@@ -34,3 +34,5 @@ wheels/
 # Project specific
 Results/
 *.csv
+
+token.txt
