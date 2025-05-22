@@ -1,0 +1,5 @@
+Role: Accountant
+Skills: Bookkeeping, Tax Preparation, QuickBooks, Financial Reporting
+Experience: 2–5 years
+Education: Bachelor’s in Accounting or CPA
+Responsibilities: Prepare financial statements, file taxes, audit records, ensure compliance with regulations.

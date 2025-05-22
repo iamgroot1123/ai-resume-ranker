@@ -1,0 +1,5 @@
+Role: Machine Learning Engineer
+Skills: Python, TensorFlow, PyTorch, Model Deployment, Cloud Platforms
+Experience: 3–5 years
+Education: Bachelor’s or Master’s in Computer Science or Data Science
+Responsibilities: Build and optimize ML models, deploy algorithms in production, tune hyperparameters, ensure model scalability.

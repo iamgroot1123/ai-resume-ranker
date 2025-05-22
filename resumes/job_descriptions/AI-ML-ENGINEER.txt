@@ -1,0 +1,5 @@
+Role: AI/ML Engineer
+Skills: Python, Scikit-Learn, Keras, Model Interpretability, MLOps
+Experience: 4–6 years
+Education: Master’s in AI, Machine Learning, or related field
+Responsibilities: Develop and deploy AI/ML models, automate ML pipelines, ensure model fairness, collaborate with data scientists.

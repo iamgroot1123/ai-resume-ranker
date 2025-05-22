@@ -1,0 +1,5 @@
+Role: Aviation Maintenance Technician
+Skills: Aircraft Repair, Diagnostics, FAA Regulations, Technical Documentation
+Experience: 3–6 years
+Education: FAA Airframe and Powerplant (A&P) Certification
+Responsibilities: Inspect and repair aircraft, perform scheduled maintenance, ensure compliance with safety standards, document repairs.

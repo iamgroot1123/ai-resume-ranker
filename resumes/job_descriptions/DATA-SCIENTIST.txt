@@ -1,0 +1,5 @@
+Role: Data Scientist
+Skills: Python, R, Machine Learning, TensorFlow, Big Data Tools
+Experience: 3–6 years
+Education: Master’s in Data Science or related field
+Responsibilities: Develop predictive models, analyze complex datasets, deploy ML algorithms, communicate insights to stakeholders.

@@ -1,0 +1,5 @@
+Role: IT Specialist
+Skills: Network Administration, Cybersecurity, Python, SQL, Cloud Computing
+Experience: 3–5 years
+Education: Bachelor’s in Computer Science or related field
+Responsibilities: Maintain IT infrastructure, troubleshoot hardware/software issues, implement security protocols, manage databases.

@@ -1,0 +1,5 @@
+Role: AI Engineer
+Skills: Deep Learning, NLP, Computer Vision, Reinforcement Learning
+Experience: 4–7 years
+Education: Master’s in AI, Computer Science, or related field
+Responsibilities: Design AI systems, implement neural networks, integrate AI solutions, research emerging AI techniques.

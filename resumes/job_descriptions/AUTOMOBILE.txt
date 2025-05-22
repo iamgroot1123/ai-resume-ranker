@@ -1,0 +1,5 @@
+Role: Automobile Technician
+Skills: Vehicle Diagnostics, Repair, Maintenance, Technical Documentation
+Experience: 2–5 years
+Education: Certification in Automotive Technology
+Responsibilities: Diagnose vehicle issues, perform repairs, conduct routine maintenance, ensure safety compliance.

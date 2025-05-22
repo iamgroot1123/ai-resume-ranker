@@ -1,0 +1,5 @@
+Role: Cloud Engineer
+Skills: AWS, Azure, Docker, Kubernetes, Infrastructure as Code
+Experience: 3–6 years
+Education: Bachelor’s in Computer Science or IT
+Responsibilities: Deploy and manage cloud infrastructure, optimize cloud performance, implement security protocols, automate deployments.

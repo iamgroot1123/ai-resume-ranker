@@ -1,0 +1,5 @@
+Role: Data Analyst
+Skills: SQL, Excel, Tableau, Statistical Analysis, Data Visualization
+Experience: 2–4 years
+Education: Bachelor’s in Statistics, Mathematics, or related field
+Responsibilities: Analyze datasets, create reports, build dashboards, identify trends to support business decisions.

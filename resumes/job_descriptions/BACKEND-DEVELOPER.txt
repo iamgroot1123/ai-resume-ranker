@@ -1,0 +1,5 @@
+Role: Backend Developer
+Skills: Node.js, Python, SQL, API Development, MongoDB
+Experience: 2–5 years
+Education: Bachelor’s in Computer Science or equivalent
+Responsibilities: Build server-side applications, design APIs, manage databases, ensure system scalability and security.

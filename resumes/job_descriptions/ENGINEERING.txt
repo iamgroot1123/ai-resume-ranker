@@ -1,0 +1,5 @@
+Role: Mechanical Engineer
+Skills: CAD Software, Prototyping, Project Management, Thermodynamics
+Experience: 3–6 years
+Education: Bachelor’s in Mechanical Engineering
+Responsibilities: Design mechanical systems, conduct simulations, oversee prototype testing, collaborate with production teams.

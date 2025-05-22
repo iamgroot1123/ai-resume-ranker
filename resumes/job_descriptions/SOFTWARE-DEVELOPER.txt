@@ -1,0 +1,5 @@
+Role: Software Developer
+Skills: Python, Java, JavaScript, Git, Agile Development
+Experience: 2–5 years
+Education: Bachelor’s in Computer Science or equivalent
+Responsibilities: Write and test code, develop software applications, collaborate with product teams, maintain codebase.
