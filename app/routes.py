@@ -3,12 +3,16 @@ from .utils import rank_resumes
 import pandas as pd
 from pathlib import Path
 import os
+from scripts.SBERT.resume_ranker_sbert import run_resume_ranker
+import pandas as pd
+from PyPDF2 import PdfReader
 
 main = Blueprint("main", __name__)
 
 # Get base path from environment variable
-BASE_PATH = Path(os.getenv('BASE_PATH', os.path.dirname(os.path.abspath(__file__))))
-RESULTS_DIR = BASE_PATH / "Results"
+# BASE_PATH = Path(os.getenv('BASE_PATH', os.path.dirname(os.path.abspath(__file__))))
+# RESULTS_DIR = BASE_PATH / "Results"
+RESULTS_DIR = Path("/tmp/Results")
 
 # Create results directory if it doesn't exist
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -41,13 +45,36 @@ def index():
             return render_template("index.html", error="Please upload at least one valid .txt or .pdf resume.")
         
         # Rank resumes
-        top_resumes, error = rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes=resume_files)
+        # top_resumes, error = rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes=resume_files)
         
-        if error:
-            return render_template("index.html", error=error)
+        # if error:
+        #     return render_template("index.html", error=error)
+
+        # Convert uploaded files into DataFrame
+        data = []
+        for f in resume_files:
+            if f.filename.endswith(".txt"):
+                text = f.read().decode("utf-8", errors="ignore")
+            elif f.filename.endswith(".pdf"):
+                reader = PdfReader(f)
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            else:
+                continue
+            data.append({"ID": f.filename, "Resume_str": text})
+
+        resumes_df = pd.DataFrame(data)
+
+        # Run the SBERT ranker
+        results = run_resume_ranker(resumes_df, job_desc_text, top_n=top_n, keywords=keywords.split(",") if keywords else None)
+
+        if not results or "custom" not in results:
+            return render_template("index.html", error="No matching resumes found.")
+
+        top_resumes = results["custom"]
+
         
         # Save results to CSV
-        BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
+        # BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
         # csv_path = BASE_PATH / "Results/results.csv"
         # top_resumes.to_csv(csv_path, index=False)
         csv_path = RESULTS_DIR / f"results_{int(time.time())}.csv"
@@ -64,6 +91,6 @@ def index():
 
 @main.route("/download/<path:filename>")
 def download_file(filename):
-    BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
+    # BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
     # return send_file(BASE_PATH / filename, as_attachment=True)
     return send_file(RESULTS_DIR / filename, as_attachment=True)

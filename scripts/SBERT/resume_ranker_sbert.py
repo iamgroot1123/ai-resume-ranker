@@ -97,6 +97,26 @@ def rank_resumes(df, job_descs, valid_categories, model, top_n=5, phase="Trainin
     
     return results
 
+def run_resume_ranker(resumes_df, job_desc_text, top_n=5, keywords=None):
+    from sentence_transformers import SentenceTransformer
+    model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
+
+    resumes_df = resumes_df.copy()
+    resumes_df["Resume_str"] = resumes_df["Resume_str"].fillna("No content").astype(str)
+
+    results = rank_resumes(
+        resumes_df,
+        job_descs={ "custom": job_desc_text },
+        valid_categories=["custom"],
+        model=model,
+        top_n=top_n,
+        phase="Testing",
+        keywords=keywords,
+        job_desc_text=job_desc_text
+    )
+    return results
+
+
 def main():
     parser = argparse.ArgumentParser(description="Resume Ranker with SBERT")
     parser.add_argument("--top-n", type=int, default=5, help="Number of top resumes to return per category")
@@ -104,7 +124,8 @@ def main():
     parser.add_argument("--keywords", type=str, help="Comma-separated keywords for filtering")
     args = parser.parse_args()
     
-    BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
+    # BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
+    BASE_PATH = Path(os.getenv("BASE_PATH", "/tmp/ai-resume-ranker"))
     RESUMES_PATH = BASE_PATH / "resumes"
     RESULTS_PATH = BASE_PATH / "Results"
     OUTPUT_DIR = BASE_PATH / "scripts/SBERT"
