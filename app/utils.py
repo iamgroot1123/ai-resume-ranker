@@ -6,6 +6,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from pathlib import Path
 import pickle
 import PyPDF2
+import pdfplumber  # Add this
 import re
 import nltk
 from nltk.corpus import stopwords
@@ -19,22 +20,40 @@ def load_model():
 
 def extract_text_from_pdf(file):
     """Extract text from a PDF file."""
+    text = ""
     try:
-        reader = PyPDF2.PdfReader(file)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() or ""
+        with pdfplumber.open(file) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text() or ""
+                print(f"Extracted PDF text: {page_text[:100]}")  # Debug
+                text += page_text
         return text.strip() or "No content"
-    except:
-        return "No content"
+    except Exception as e:
+        print(f"pdfplumber error: {e}")
+        try:
+            reader = PyPDF2.PdfReader(file)
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                print(f"PyPDF2 extracted text: {page_text[:100]}")  # Debug
+                text += page_text
+            return text.strip() or "No content"
+        except Exception as e:
+            print(f"PyPDF2 error: {e}")
+            return "No content"
 
 def extract_email(text):
     """Extract the first email address from text using regex."""
+    print(f"Email extraction input: {text[:100]}")  # Debug
     if not isinstance(text, str) or not text.strip():
+        print("No valid text for email extraction")
         return "No email found"
     email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
     match = re.search(email_pattern, text)
-    return match.group(0) if match else "No email found"
+    email = match.group(0) if match else "No email found"
+    print(f"Extracted email: {email}")  # Debug
+    return email
+
+# ... rest of utils.py unchanged ...
 
 def clean_text(text):
     """Clean text by removing noise and normalizing, focusing on skills."""
