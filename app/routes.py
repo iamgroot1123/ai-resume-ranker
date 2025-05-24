@@ -6,6 +6,7 @@ import os
 from scripts.SBERT.resume_ranker_sbert import run_resume_ranker
 import pandas as pd
 from PyPDF2 import PdfReader
+import time
 
 main = Blueprint("main", __name__)
 
