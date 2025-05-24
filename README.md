@@ -17,7 +17,7 @@ The AI-Powered Resume Ranker is a web-based application that automates resume sc
 ![Upload Interface](screenshots/upload.png)
 *Upload `.pdf` or `.txt` resumes, job descriptions, keywords, and select top-N candidates.*
 
-![Results Page](screenshots/results.png)
+![Results Page](screenshots/result.png)
 *View ranked resumes with similarity scores and email addresses, and download results as CSV.*
 
 ## Running Locally
