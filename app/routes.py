@@ -19,9 +19,6 @@ def index():
         keywords = request.form.get("keywords")
         top_n = int(request.form.get("top_n", 5))
 
-        if len(resume_files) > 50:
-            return render_template("index.html", error="Maximum 50 resumes allowed.")
-
         job_desc_text = ""
 
         # Extract text if file uploaded
