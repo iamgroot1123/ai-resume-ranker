@@ -7,7 +7,8 @@ from scripts.SBERT.resume_ranker_sbert import run_resume_ranker
 import time
 
 main = Blueprint("main", __name__)
-RESULTS_DIR = Path("/tmp/Results")
+BASE_DIR = Path(__file__).resolve().parent.parent  # project root (ai-resume-ranker)
+RESULTS_DIR = BASE_DIR / "Results"
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
 @main.route("/", methods=["GET", "POST"])
@@ -77,11 +78,14 @@ def index():
             "results.html",
             top_resumes=top_resumes.to_dict(orient="records"),
             job_desc=job_desc_text,
-            csv_path=csv_path
+            csv_filename=csv_path.name
         )
 
     return render_template("index.html")
 
-@main.route("/download/<path:filename>")
+@main.route("/download/<filename>")
 def download_file(filename):
-    return send_file(RESULTS_DIR / filename, as_attachment=True)
+    file_path = RESULTS_DIR / filename
+    if not file_path.exists():
+        return f"File not found: {filename}", 404
+    return send_file(file_path, as_attachment=True)
