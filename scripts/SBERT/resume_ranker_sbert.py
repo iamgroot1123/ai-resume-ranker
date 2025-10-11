@@ -110,7 +110,7 @@ def run_resume_ranker(resumes_df, job_desc_text, top_n=5, keywords=None):
     resumes_df["Resume_str"] = resumes_df["Resume_str"].fillna("No content").astype(str)
 
     # Encode texts on the fly
-    job_vector, _ = vectorize_texts_sbert([job_desc_text], model)
+    job_vectors, _ = vectorize_texts_sbert([job_desc_text], model)
     resume_vectors, _ = vectorize_texts_sbert(resumes_df["Resume_str"].tolist(), model)
     
     job_desc_categories = ["custom"]
