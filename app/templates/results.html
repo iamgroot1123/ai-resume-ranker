@@ -50,68 +50,126 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Resume Ranking Results</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
     <style>
       body {
-        font-family: Arial, sans-serif;
-        margin: 40px;
+        font-family: 'Inter', sans-serif;
+        background-color: #f8f9fa;
+        padding-top: 20px;
+        padding-bottom: 20px;
+      }
+      .container {
+        max-width: 900px;
       }
       h1 {
-        color: #333;
+        margin-bottom: 20px;
+        color: #0d6efd;
       }
-      table {
-        width: 100%;
-        border-collapse: collapse;
+      .table-responsive {
         margin-top: 20px;
       }
-      th,
-      td {
-        border: 1px solid #ddd;
-        padding: 8px;
-        text-align: left;
+      .table th,
+      .table td {
+        white-space: normal; /* Allow text wrapping */
+        word-wrap: break-word;
       }
-      th {
-        background-color: #f2f2f2;
-      }
-      a {
-        color: #0066cc;
-        text-decoration: none;
-      }
-      a:hover {
-        text-decoration: underline;
-      }
-      .job-desc {
-        margin-bottom: 20px;
+      .job-desc-box {
+        background-color: #e9ecef;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #0d6efd;
         white-space: pre-wrap;
+        font-size: 0.9em;
+        max-height: 200px;
+        overflow-y: auto;
+      }
+      .match-keyword {
+        display: inline-block;
+        background-color: #d1e7dd; /* Light green for match */
+        color: #0f5132;
+        padding: 4px 8px;
+        border-radius: 4px;
+        margin-right: 5px;
+        margin-bottom: 5px;
+        font-size: 0.85em;
+        font-weight: 600;
+        cursor: help;
+      }
+      .similarity-score {
+        font-weight: bold;
+        color: #dc3545; /* Red for high visibility */
+      }
+      .back-link {
+        margin-top: 20px;
+        display: inline-block;
       }
     </style>
   </head>
   <body>
-    <h1>Resume Ranking Results</h1>
+    <div class="container bg-white shadow rounded-lg p-4">
+      <h1 class="text-center">Resume Ranking Results</h1>
 
-    <h2>Job Description:</h2>
-    <div class="job-desc">{{ job_desc | truncate(500) }}</div>
+      <h2 class="h5 mb-2 mt-4 text-secondary">Job Description Snippet:</h2>
+      <div class="job-desc-box mb-4">
+        {{ job_desc | truncate(500) }}
+      </div>
 
-    <h2>Top {{ top_resumes | length }} Resumes:</h2>
-    <table>
-      <tr>
-        <th>Resume ID/Filename</th>
-        <th>Similarity Score</th>
-        <th>Email ID</th>
-      </tr>
-      {% for resume in top_resumes %}
-      <tr>
-        <td>{{ resume.ID }}</td>
-        <td>{{ resume.similarity | round(3) }}</td>
-        <td>{{ resume.email }}</td>
-      </tr>
-      {% endfor %}
-    </table>
+      <h2 class="h5 mb-3 text-primary">
+        Top {{ top_resumes | length }} Candidates
+      </h2>
+      <div class="table-responsive">
+        <table class="table table-striped table-hover rounded-3">
+          <thead>
+            <tr>
+              <th scope="col">Rank</th>
+              <th scope="col">Resume ID/Filename</th>
+              <th scope="col">
+                <span data-bs-toggle="tooltip" title="SBERT Cosine Similarity">Similarity Score</span>
+              </th>
+              <th scope="col">Email ID</th>
+              <th scope="col">
+                <span data-bs-toggle="tooltip" title="Top terms found in both JD and Resume">Key Matches</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for resume in top_resumes %}
+            <tr>
+              <th scope="row">{{ loop.index }}</th>
+              <td>{{ resume.ID }}</td>
+              <td>
+                <span class="similarity-score">{{ resume.similarity | round(4) }}</span>
+              </td>
+              <td>{{ resume.email }}</td>
+              <td>
+                {% for match in resume.key_matches.split(', ') %}
+                <span class="match-keyword">{{ match | replace('_', ' ') }}</span>
+                {% endfor %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
 
-    <a
-      href="{{ url_for('main.download_file', filename=csv_filename) }}"
-      class="btn btn-success"
-      >Download Results</a
-    >
-    <p><a href="{{ url_for('main.index') }}">Back to Home</a></p>
+      <a
+        href="{{ url_for('main.download_file', filename=csv_filename) }}"
+        class="btn btn-success fw-bold me-3 mt-3"
+        >Download Full CSV Results</a
+      >
+      <a href="{{ url_for('main.index') }}" class="btn btn-outline-secondary mt-3 back-link"
+        >Back to Home</a
+      >
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize tooltips (for the table headers)
+        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+          return new bootstrap.Tooltip(tooltipTriggerEl)
+        })
+    </script>
   </body>
 </html>

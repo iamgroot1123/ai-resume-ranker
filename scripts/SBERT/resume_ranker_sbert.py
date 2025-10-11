@@ -14,11 +14,9 @@ def load_data(resumes_path):
     df = pd.read_csv(csv_path)
     
     df["Resume_str"] = df["Resume_str"].fillna("No content").astype(str)
-    training_df = df.copy()
-    print(f"Training: Using {len(training_df)} resumes across {len(training_df['Category'].unique())} categories.")
-    testing_df = df.copy()
-    print(f"Testing: Loaded {len(testing_df)} resumes.")
+    print(f"Loaded {len(df)} resumes across {len(df['Category'].unique())} categories.")
     
+    # Load job descriptions
     job_desc_path = resumes_path / "job_descriptions"
     job_descs = {}
     for txt_file in job_desc_path.glob("*.txt"):
@@ -27,11 +25,15 @@ def load_data(resumes_path):
             text = f.read().strip()
             job_descs[category] = text if text else "No content"
     
-    return training_df, testing_df, job_descs
+    # Use the same DataFrame for both training and testing/evaluation runs
+    return df.copy(), df.copy(), job_descs
 
 def filter_resumes(df, keywords):
     """Filter resumes containing specific keywords."""
-    filtered_df = df[df["Resume_str"].str.lower().str.contains("|".join(keywords), na=False)].copy()
+    if not keywords:
+        return df
+    keywords_list = [k.strip().lower() for k in keywords]
+    filtered_df = df[df["Resume_str"].str.lower().str.contains("|".join(keywords_list), na=False)].copy()
     return filtered_df
 
 def vectorize_texts_sbert(texts, model, batch_size=100):
@@ -46,86 +48,92 @@ def vectorize_texts_sbert(texts, model, batch_size=100):
     print(f"Encoded {len(vectors)} texts with shape {vectors.shape}")
     return vectors, model
 
-def rank_resumes(df, job_descs, valid_categories, model, top_n=5, phase="Training", keywords=None, job_desc_text=None, job_desc_file=None):
-    """Rank resumes against job descriptions or custom input."""
-    if phase == "Testing" and keywords:
-        print(f"{phase}: Filtering resumes with keywords: {keywords}")
-        df = filter_resumes(df, keywords)
-        if df.empty:
-            print(f"{phase}: No resumes match keywords. Using all resumes.")
-            df = df.copy()
-        print(f"{phase}: Filtered to {len(df)} resumes.")
+def rank_resumes(df, job_vectors, job_desc_categories, resume_vectors, top_n=5, phase="Evaluation", keywords=None):
+    """Rank resumes against job description vectors."""
     
-    print(f"{phase}: Preparing texts...")
-    df.loc[:, "processed_resume"] = df["Resume_str"].astype(str)
-    
-    if job_desc_text or job_desc_file:
-        if job_desc_file:
-            with open(job_desc_file, "r", encoding="utf-8") as f:
-                job_desc_text = f.read().strip() or "No content"
-        category = Path(job_desc_file).stem if job_desc_file else "custom"
-        job_desc_processed = {category: job_desc_text}
-        valid_categories = [category]
+    # Pre-filter step for Testing/Evaluation runs
+    if phase == "Evaluation" and keywords:
+        print(f"{phase}: Filtering resumes with keywords...")
+        df_filtered = filter_resumes(df, keywords)
+        
+        # Determine the subset of resume vectors that correspond to the filtered resumes
+        if not df_filtered.empty and len(df_filtered) < len(df):
+            # Map filtered IDs back to the original index for slicing the vectors
+            original_indices = df[df['ID'].isin(df_filtered['ID'])].index.tolist()
+            current_resume_vectors = resume_vectors[original_indices]
+            df = df_filtered.copy()
+        elif df_filtered.empty:
+            print(f"{phase}: No resumes match keywords. Skipping ranking for this category.")
+            return {} # Skip this category if no resumes match
+        else:
+            current_resume_vectors = resume_vectors
     else:
-        job_desc_processed = {cat: text for cat, text in job_descs.items() if cat in valid_categories}
-    
-    print(f"{phase}: Vectorizing texts with Sentence-BERT...")
-    all_texts = df["processed_resume"].tolist() + list(job_desc_processed.values())
-    vectors, _ = vectorize_texts_sbert(all_texts, model)
-    
-    resume_vectors = vectors[:len(df)]
-    job_desc_vectors = vectors[len(df):]
-    
+        current_resume_vectors = resume_vectors
+
     results = {}
-    for idx, category in enumerate(tqdm(job_desc_processed.keys(), desc=f"{phase} Ranking")):
+    for idx, category in enumerate(tqdm(job_desc_categories, desc=f"{phase} Ranking")):
         print(f"{phase}: Ranking for {category}...")
         try:
-            similarities = cosine_similarity(resume_vectors, job_desc_vectors[idx:idx+1]).flatten()
-            df.loc[:, "similarity"] = similarities
+            # Calculate similarity for only the current subset of resumes
+            similarities = cosine_similarity(current_resume_vectors, job_vectors[idx:idx+1]).flatten()
+            
+            # Create a temporary DataFrame for this category's results
+            temp_df = df.copy()
+            temp_df.loc[:, "similarity"] = similarities
+            
+            # For "Training" (baseline) runs, filter to the correct category
+            if phase == "Training":
+                category_resumes = temp_df[temp_df["Category"] == category].copy()
+            else:
+                category_resumes = temp_df.copy() # Use all resumes for testing/custom
+                
+            if not category_resumes.empty:
+                top_resumes = category_resumes.sort_values(by="similarity", ascending=False)[["ID", "similarity"]].head(top_n)
+                results[category] = top_resumes
+            else:
+                print(f"{phase}: No relevant resumes found for {category}")
         except Exception as e:
             print(f"Error ranking {category}: {e}")
             continue
-        if phase == "Training" and category != "custom":
-            category_resumes = df[df["Category"] == category].copy()
-        else:
-            category_resumes = df.copy()
-        if not category_resumes.empty:
-            top_resumes = category_resumes.sort_values(by="similarity", ascending=False)[["ID", "similarity"]].head(top_n)
-            results[category] = top_resumes
-        else:
-            print(f"{phase}: No resumes found for {category}")
     
     return results
 
+# This function is now mostly redundant since Flask uses utils.py, 
+# but we keep it here to maintain compatibility with the original project skeleton's CLI usage.
 def run_resume_ranker(resumes_df, job_desc_text, top_n=5, keywords=None):
-    from sentence_transformers import SentenceTransformer
+    # This block should ideally not be used in the CLI script, as the main() function handles
+    # the training/testing pipeline. We retain it primarily for conceptual completeness if 
+    # the user still wants to use it outside the Flask app.
+    
     model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
-
     resumes_df = resumes_df.copy()
     resumes_df["Resume_str"] = resumes_df["Resume_str"].fillna("No content").astype(str)
 
+    # Encode texts on the fly
+    job_vector, _ = vectorize_texts_sbert([job_desc_text], model)
+    resume_vectors, _ = vectorize_texts_sbert(resumes_df["Resume_str"].tolist(), model)
+    
+    job_desc_categories = ["custom"]
+    
+    # Simplified ranking call using the on-the-fly vectors
     results = rank_resumes(
-        resumes_df,
-        job_descs={ "custom": job_desc_text },
-        valid_categories=["custom"],
-        model=model,
-        top_n=top_n,
-        phase="Testing",
-        keywords=keywords,
-        job_desc_text=job_desc_text
+        resumes_df, 
+        job_vectors, 
+        job_desc_categories, 
+        resume_vectors, 
+        top_n=top_n, 
+        phase="Evaluation", 
+        keywords=keywords.split(",") if keywords else None
     )
     return results
-
 
 def main():
     parser = argparse.ArgumentParser(description="Resume Ranker with SBERT")
     parser.add_argument("--top-n", type=int, default=5, help="Number of top resumes to return per category")
-    parser.add_argument("--job-desc-file", type=str, help="Path to custom job description file for testing")
-    parser.add_argument("--keywords", type=str, help="Comma-separated keywords for filtering")
+    parser.add_argument("--skip-training", action="store_true", help="Skip the baseline training evaluation run.")
     args = parser.parse_args()
     
-    # BASE_PATH = Path("/home/madhukiran/Desktop/Elevate Labs/Project/ai-resume-ranker")
-    BASE_PATH = Path(os.getenv("BASE_PATH", "/tmp/ai-resume-ranker"))
+    BASE_PATH = Path(os.getenv("BASE_PATH", Path(__file__).resolve().parent.parent.parent)) # Project Root
     RESUMES_PATH = BASE_PATH / "resumes"
     RESULTS_PATH = BASE_PATH / "Results"
     OUTPUT_DIR = BASE_PATH / "scripts/SBERT"
@@ -135,88 +143,109 @@ def main():
     if not RESUMES_PATH.exists():
         print(f"Error: Folder {RESUMES_PATH} does not exist.")
         return
-    if not RESULTS_PATH.exists():
-        print(f"Error: Folder {RESULTS_PATH} does not exist. Creating it...")
-        RESULTS_PATH.mkdir(parents=True)
-    
+    RESULTS_PATH.mkdir(parents=True, exist_ok=True)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     # Load SBERT model
     model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
     
+    training_df, testing_df, job_descs = load_data(RESUMES_PATH)
+    all_resumes_df = training_df.copy() # Use a single df for vector generation
+
+    # --- Embedding Logic (Centralized) ---
     if EMBEDDINGS_PATH.exists():
         print("Loading pre-computed embeddings...")
         resume_vectors = np.load(EMBEDDINGS_PATH)
-        with open(MODEL_PATH, "rb") as f:
-            saved_data = pickle.load(f)
-        training_df = saved_data["training_df"]
-        print(f"Loaded embeddings for {len(resume_vectors)} resumes.")
     else:
         print("Computing embeddings for all resumes...")
-        training_df, _, _ = load_data(RESUMES_PATH)
-        resume_texts = training_df["Resume_str"].astype(str).tolist()
+        resume_texts = all_resumes_df["Resume_str"].astype(str).tolist()
         resume_vectors, _ = vectorize_texts_sbert(resume_texts, model)
         np.save(EMBEDDINGS_PATH, resume_vectors)
-        with open(MODEL_PATH, "wb") as f:
-            pickle.dump({"training_df": training_df}, f)
         print(f"Saved embeddings to {EMBEDDINGS_PATH}")
     
-    training_df, testing_df, job_descs = load_data(RESUMES_PATH)
+    # Encode all job descriptions for batch evaluation
+    job_desc_categories = list(job_descs.keys())
+    job_desc_texts = list(job_descs.values())
+    job_vectors, _ = vectorize_texts_sbert(job_desc_texts, model)
     
-    training_categories = training_df["Category"].unique().tolist()
-    training_results = rank_resumes(
-        training_df, job_descs, training_categories, model, top_n=args.top_n, phase="Training"
-    )
-    
-    if args.job_desc_file:
-        keywords = args.keywords.split(",") if args.keywords else None
-        testing_results = rank_resumes(
-            testing_df, job_descs, [], model, top_n=args.top_n, phase="Testing",
-            keywords=keywords, job_desc_file=args.job_desc_file
+    # --- Training/Baseline Evaluation ---
+    if not args.skip_training:
+        print("\n--- Starting Training/Baseline Evaluation ---")
+        training_categories = training_df["Category"].unique().tolist()
+        
+        # Filter JD vectors and categories to only those present in training data
+        train_jd_indices = [job_desc_categories.index(c) for c in training_categories if c in job_desc_categories]
+        train_job_vectors = job_vectors[train_jd_indices]
+        train_job_categories = [job_desc_categories[i] for i in train_jd_indices]
+
+        # Use the full, unfiltered resume_vectors and all_resumes_df for training ranking
+        training_results = rank_resumes(
+            all_resumes_df, train_job_vectors, train_job_categories, resume_vectors, top_n=args.top_n, phase="Training"
         )
-    else:
-        testing_categories = [
-            "software-developer", "data-analyst", "data-scientist", "machine-learning-engineer",
-            "artificial-intelligence-engineer", "backend-developer", "cloud-engineer", "ai-ml-engineer"
-        ]
-        testing_keywords = {
-            "software-developer": ["software", "programming", "python", "java"],
-            "data-analyst": ["data", "analytics", "sql", "excel"],
-            "data-scientist": ["data", "machine learning", "statistics", "python"],
-            "machine-learning-engineer": ["machine learning", "tensorflow", "pytorch", "python"],
-            "artificial-intelligence-engineer": ["ai", "artificial intelligence", "neural networks"],
-            "backend-developer": ["backend", "server", "api", "database"],
-            "cloud-engineer": ["cloud", "aws", "azure", "docker"],
-            "ai-ml-engineer": ["ai", "machine learning", "deep learning"]
-        }
-        testing_results = {}
-        for category in testing_categories:
-            print(f"\nTesting for {category}...")
-            category_results = rank_resumes(
-                testing_df, job_descs, [category], model, top_n=args.top_n,
-                phase="Testing", keywords=testing_keywords.get(category, [])
-            )
-            testing_results.update(category_results)
-    
-    print("\nTraining Results:")
-    for category, top_resumes in training_results.items():
-        print(f"Top {args.top_n} resumes for {category}:")
-        print(top_resumes.to_string(index=False))
-    
-    print("\nTesting Results:")
-    for category, top_resumes in testing_results.items():
-        print(f"Top {args.top_n} resumes for {category}:")
-        print(top_resumes.to_string(index=False))
-    
-    output_path = OUTPUT_DIR / "training_results.csv"
-    training_all = pd.concat([df.assign(Category=cat) for cat, df in training_results.items()], ignore_index=True)
-    training_all.to_csv(output_path, index=False)
-    print(f"\nTraining results saved to {output_path}")
-    
+        
+        print("\nTraining Results:")
+        training_all = pd.DataFrame()
+        for category, top_resumes in training_results.items():
+            print(f"Top {args.top_n} resumes for {category}:")
+            print(top_resumes.to_string(index=False))
+            training_all = pd.concat([training_all, top_resumes.assign(Category=category)], ignore_index=True)
+            
+        output_path = OUTPUT_DIR / "training_results.csv"
+        training_all.to_csv(output_path, index=False)
+        print(f"\nTraining results saved to {output_path}")
+
+    # --- Testing/Generalization Evaluation ---
+    print("\n--- Starting Testing/Generalization Evaluation ---")
+    testing_categories = [
+        "software-developer", "data-analyst", "data-scientist", "machine-learning-engineer",
+        "artificial-intelligence-engineer", "backend-developer", "cloud-engineer", "ai-ml-engineer"
+    ]
+    testing_keywords = {
+        "software-developer": ["software", "programming", "python", "java"],
+        "data-analyst": ["data", "analytics", "sql", "excel"],
+        "data-scientist": ["data science", "machine learning", "statistics", "python"],
+        "machine-learning-engineer": ["machine learning", "tensorflow", "pytorch", "python"],
+        "artificial-intelligence-engineer": ["ai", "artificial intelligence", "neural networks", "deep learning"],
+        "backend-developer": ["backend", "server", "api", "database", "django", "node"],
+        "cloud-engineer": ["cloud", "aws", "azure", "docker", "kubernetes"],
+        "ai-ml-engineer": ["ai", "machine learning", "deep learning", "nlp"]
+    }
+    testing_results = {}
+    testing_all = pd.DataFrame()
+
+    for category in testing_categories:
+        # Find the JD vector for the current testing category
+        try:
+            jd_idx = job_desc_categories.index(category)
+            job_vector_subset = job_vectors[jd_idx:jd_idx+1]
+        except ValueError:
+            print(f"Warning: Job description file for {category} not found. Skipping.")
+            continue
+            
+        keywords = testing_keywords.get(category, [])
+        print(f"\nTesting for {category} (Keywords: {', '.join(keywords) or 'None'})...")
+        
+        category_results = rank_resumes(
+            all_resumes_df.copy(), # Pass a copy to avoid modification
+            job_vector_subset,
+            [category], 
+            resume_vectors,
+            top_n=args.top_n,
+            phase="Evaluation", 
+            keywords=keywords
+        )
+        
+        testing_results.update(category_results)
+        if category in category_results:
+            top_resumes = category_results[category]
+            print(f"Top {args.top_n} resumes for {category}:")
+            print(top_resumes.to_string(index=False))
+            testing_all = pd.concat([testing_all, top_resumes.assign(Category=category)], ignore_index=True)
+
     output_path = OUTPUT_DIR / "testing_results.csv"
-    testing_all = pd.concat([df.assign(Category=cat) for cat, df in testing_results.items()], ignore_index=True)
     testing_all.to_csv(output_path, index=False)
-    print(f"Testing results saved to {output_path}")
+    print(f"\nTesting results saved to {output_path}")
+
 
 if __name__ == "__main__":
     main()

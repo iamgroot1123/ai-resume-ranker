@@ -3,20 +3,24 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
-from pathlib import Path
-import pickle
 import PyPDF2
-import pdfplumber  # Add this
+import pdfplumber
 import re
 import nltk
 from nltk.corpus import stopwords
+from flask import current_app
 
 nltk.download('stopwords', quiet=True)
 
-def load_model():
-    """Load SBERT model."""
-    model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
-    return model
+def load_model_once():
+    """Load SBERT model once upon application startup."""
+    try:
+        model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
+        print("SBERT model loaded successfully for application context.")
+        return model
+    except Exception as e:
+        print(f"Error loading SBERT model: {e}")
+        return None
 
 def extract_text_from_pdf(file):
     """Extract text from a PDF file."""
@@ -25,47 +29,49 @@ def extract_text_from_pdf(file):
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
                 page_text = page.extract_text() or ""
-                print(f"Extracted PDF text: {page_text[:100]}")  # Debug
                 text += page_text
         return text.strip() or "No content"
     except Exception as e:
-        print(f"pdfplumber error: {e}")
         try:
             reader = PyPDF2.PdfReader(file)
             for page in reader.pages:
                 page_text = page.extract_text() or ""
-                print(f"PyPDF2 extracted text: {page_text[:100]}")  # Debug
                 text += page_text
             return text.strip() or "No content"
-        except Exception as e:
-            print(f"PyPDF2 error: {e}")
+        except:
             return "No content"
 
 def extract_email(text):
     """Extract the first email address from text using regex."""
-    print(f"Email extraction input: {text[:100]}")  # Debug
     if not isinstance(text, str) or not text.strip():
-        print("No valid text for email extraction")
         return "No email found"
     email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
     match = re.search(email_pattern, text)
     email = match.group(0) if match else "No email found"
-    print(f"Extracted email: {email}")  # Debug
     return email
 
-# ... rest of utils.py unchanged ...
-
 def clean_text(text):
-    """Clean text by removing noise and normalizing, focusing on skills."""
+    """Clean text by removing noise and normalizing."""
     text = re.sub(r'\s+', ' ', text)
     text = re.sub(r'[^\w\s]', '', text)
     text = text.lower().strip()
+    # Remove large, non-contextual sections like "References"
     text = re.sub(r'\b(professional summary|summary|references|education|certifications)\b.*?(?=\b\w+\b|$)', '', text, flags=re.IGNORECASE)
     return text or "No content"
 
+def vectorize_texts_sbert(texts, model, batch_size=100):
+    """Vectorize texts using Sentence-BERT."""
+    valid_texts = [clean_text(t) if isinstance(t, str) and t.strip() else "No content" for t in texts]
+    vectors = []
+    for i in range(0, len(valid_texts), batch_size):
+        batch = valid_texts[i:i + batch_size]
+        batch_vectors = model.encode(batch, show_progress_bar=False, convert_to_numpy=True)
+        vectors.append(batch_vectors)
+    return np.vstack(vectors)
+
 def extract_keywords_from_job_desc(job_desc_text, top_n=10):
     """Extract top keywords from job description using TF-IDF."""
-    stop_words = set(stopwords.words('english')).union({'seeking', 'expertise', 'summary', 'responsibilities', 'qualifications'})
+    stop_words = set(stopwords.words('english')).union({'seeking', 'expertise', 'summary', 'responsibilities', 'qualifications', 'must', 'have', 'experience', 'ability'})
     vectorizer = TfidfVectorizer(
         stop_words=list(stop_words),
         token_pattern=r'\b\w+\b',
@@ -78,41 +84,35 @@ def extract_keywords_from_job_desc(job_desc_text, top_n=10):
         tfidf_scores = tfidf_matrix.toarray().flatten()
         keyword_scores = [(feature_names[i], tfidf_scores[i]) for i in range(len(feature_names))]
         keyword_scores.sort(key=lambda x: x[1], reverse=True)
-        keywords = [kw for kw, score in keyword_scores[:top_n]]
-        return keywords if keywords else ["python", "skills"]
+        keywords = [kw for kw, score in keyword_scores[:top_n] if score > 0]
+        return keywords if keywords else ["skills", "project"]
     except:
-        return ["python", "skills"]
+        return ["skills", "project"]
 
 def filter_resumes(df, keywords, job_desc_text):
     """Filter resumes by keywords extracted from job description or provided."""
-    if not keywords:
-        keywords = extract_keywords_from_job_desc(job_desc_text)
-    else:
-        keywords = [k.strip().lower() for k in keywords.split(",")]
     
-    filtered_df = df[df["Resume_str"].str.lower().str.contains("|".join(keywords), na=False)].copy()
+    if isinstance(keywords, str) and keywords.strip():
+        keywords_list = [k.strip().lower() for k in keywords.split(",")]
+    else:
+        keywords_list = extract_keywords_from_job_desc(job_desc_text)
+    
+    # Filter using regex match
+    filtered_df = df[df["Resume_str"].str.lower().str.contains("|".join(keywords_list), na=False)].copy()
+    
+    # Return filtered set if non-empty, otherwise return original set
     return filtered_df if not filtered_df.empty else df
 
-def vectorize_texts_sbert(texts, model, batch_size=100):
-    """Vectorize texts using Sentence-BERT."""
-    valid_texts = [clean_text(t) if isinstance(t, str) and t.strip() else "No content" for t in texts]
-    vectors = []
-    for i in range(0, len(valid_texts), batch_size):
-        batch = valid_texts[i:i + batch_size]
-        batch_vectors = model.encode(batch, show_progress_bar=False, convert_to_numpy=True)
-        vectors.append(batch_vectors)
-    return np.vstack(vectors)
-
 def extract_key_matches(resume_text, job_desc_text, top_n=3):
-    """Extract key matching phrases using TF-IDF and stopword removal."""
+    """Extract key matching phrases using TF-IDF that appear in both JD and resume."""
     resume_text = clean_text(resume_text)
     job_desc_text = clean_text(job_desc_text)
     texts = [job_desc_text, resume_text]
-    stop_words = set(stopwords.words('english')).union({'seeking', 'expertise', 'summary', 'responsibilities', 'qualifications'})
+    stop_words = set(stopwords.words('english')).union({'seeking', 'expertise', 'summary', 'responsibilities', 'qualifications', 'must', 'have', 'experience', 'ability'})
     
     vectorizer = TfidfVectorizer(
         stop_words=list(stop_words),
-        token_pattern=r'\b\w+\b',
+        token_pattern=r'\b\w{2,}\b', # Require at least 2 characters
         max_features=100,
         ngram_range=(1, 2)
     )
@@ -127,18 +127,23 @@ def extract_key_matches(resume_text, job_desc_text, top_n=3):
     
     common_terms = []
     for i, term in enumerate(feature_names):
-        if job_tfidf[i] > 0 and resume_tfidf[i] > 0:
+        # Only count a match if the term has non-zero TF-IDF in *both* JD and resume
+        if job_tfidf[i] > 0.05 and resume_tfidf[i] > 0.05:
+            # Score by summing up the importance in both documents
             common_terms.append((term, job_tfidf[i] + resume_tfidf[i]))
     
     common_terms.sort(key=lambda x: x[1], reverse=True)
     matches = [term for term, _ in common_terms][:top_n]
     
-    return matches if matches else ["No significant matches"]
+    return [match.replace(" ", "_") for match in matches] if matches else ["No significant matches"]
 
-def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes=None):
-    """Rank resumes against a job description."""
-    model = load_model()
+def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes):
+    """Rank resumes against a job description using a pre-loaded SBERT model."""
     
+    model = current_app.model
+    if not model:
+        return None, "SBERT model not loaded. Please restart the application."
+
     job_desc_text = clean_text(job_desc_text.strip() or "No content")
     job_vector = vectorize_texts_sbert([job_desc_text], model)[0]
     
@@ -147,19 +152,25 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes=None):
     resume_emails = []
     for resume in uploaded_resumes:
         filename = resume.filename
-        if filename.endswith(".txt"):
-            text = resume.read().decode("utf-8", errors="ignore").strip() or "No content"
-        elif filename.endswith(".pdf"):
-            text = extract_text_from_pdf(resume)
-        else:
+        try:
+            # We must reset the file pointer for each file before reading
+            resume.seek(0) 
+            if filename.lower().endswith(".txt"):
+                text = resume.read().decode("utf-8", errors="ignore").strip() or "No content"
+            elif filename.lower().endswith(".pdf"):
+                text = extract_text_from_pdf(resume)
+            else:
+                continue
+            email = extract_email(text)
+            resume_texts.append(text)
+            resume_filenames.append(filename)
+            resume_emails.append(email)
+        except Exception as e:
+            print(f"Error processing file {filename}: {e}")
             continue
-        email = extract_email(text)
-        resume_texts.append(text)
-        resume_filenames.append(filename)
-        resume_emails.append(email)
-    
+
     if not resume_texts:
-        return None, "No valid resumes uploaded."
+        return None, "No valid resumes uploaded or processed."
     
     df = pd.DataFrame({
         "ID": resume_filenames,
@@ -167,21 +178,27 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes=None):
         "email": resume_emails
     })
     
-    # Filter resumes by keywords
-    df = filter_resumes(df, keywords, job_desc_text)
+    # 1. Filter resumes by keywords
+    df_filtered = filter_resumes(df, keywords, job_desc_text)
     
-    # Cap top_n at available resumes
-    top_n = min(top_n, len(df))
+    # 2. Cap top_n at available resumes (after filtering)
+    top_n = min(top_n, len(df_filtered))
     
-    resume_vectors = vectorize_texts_sbert(df["Resume_str"].tolist(), model)
+    # 3. Calculate SBERT similarity for filtered resumes
+    resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model)
     similarities = cosine_similarity(resume_vectors, job_vector.reshape(1, -1)).flatten()
-    df["similarity"] = similarities
+    df_filtered.loc[:, "similarity"] = similarities
     
-    top_resumes = df.sort_values(by="similarity", ascending=False)[["ID", "similarity", "email"]].head(top_n)
+    # 4. Get top results
+    top_resumes = df_filtered.sort_values(by="similarity", ascending=False).head(top_n).copy()
     
-    top_resumes["key_matches"] = [
-        extract_key_matches(df[df["ID"] == row["ID"]]["Resume_str"].iloc[0], job_desc_text)
-        for _, row in top_resumes.iterrows()
-    ]
-    
+    # 5. Extract key matching phrases (enhancement)
+    key_matches = []
+    for index, row in top_resumes.iterrows():
+        original_resume_text = df.loc[df["ID"] == row["ID"], "Resume_str"].iloc[0]
+        matches = extract_key_matches(original_resume_text, job_desc_text)
+        key_matches.append(", ".join(matches))
+
+    top_resumes["key_matches"] = key_matches
+
     return top_resumes, None
