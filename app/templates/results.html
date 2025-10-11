@@ -72,7 +72,7 @@
       }
       .table th,
       .table td {
-        white-space: normal; /* Allow text wrapping */
+        white-space: normal;
         word-wrap: break-word;
       }
       .job-desc-box {
@@ -87,7 +87,7 @@
       }
       .match-keyword {
         display: inline-block;
-        background-color: #d1e7dd; /* Light green for match */
+        background-color: #d1e7dd;
         color: #0f5132;
         padding: 4px 8px;
         border-radius: 4px;
@@ -95,15 +95,28 @@
         margin-bottom: 5px;
         font-size: 0.85em;
         font-weight: 600;
-        cursor: help;
       }
       .similarity-score {
         font-weight: bold;
-        color: #dc3545; /* Red for high visibility */
+        color: #dc3545;
+      }
+      .rating-score {
+          font-size: 1.1em;
+          font-weight: bold;
+          color: #198754; /* Green for score */
       }
       .back-link {
         margin-top: 20px;
         display: inline-block;
+      }
+      .info-row {
+          background-color: #f0f8ff; /* Light blue background for info row */
+      }
+      .info-row td {
+          border-top: none !important;
+          padding-top: 5px !important;
+          padding-bottom: 15px !important;
+          font-size: 0.85em;
       }
     </style>
   </head>
@@ -126,28 +139,38 @@
               <th scope="col">Rank</th>
               <th scope="col">Resume ID/Filename</th>
               <th scope="col">
-                <span data-bs-toggle="tooltip" title="SBERT Cosine Similarity">Similarity Score</span>
+                <span data-bs-toggle="tooltip" title="LLM-Guided Fit Score (1-10)">Fit Score</span>
               </th>
+              <th scope="col">Similarity</th>
               <th scope="col">Email ID</th>
-              <th scope="col">
-                <span data-bs-toggle="tooltip" title="Top terms found in both JD and Resume">Key Matches</span>
-              </th>
+              <th scope="col">Justification / Key Matches</th>
             </tr>
           </thead>
           <tbody>
             {% for resume in top_resumes %}
-            <tr>
+            <tr class="align-middle">
               <th scope="row">{{ loop.index }}</th>
               <td>{{ resume.ID }}</td>
+              <td>
+                <span class="rating-score">{{ resume.rating_10 | round(1) }} / 10</span>
+              </td>
               <td>
                 <span class="similarity-score">{{ resume.similarity | round(4) }}</span>
               </td>
               <td>{{ resume.email }}</td>
               <td>
+                <p class="mb-1 fw-bold">{{ resume.justification }}</p>
                 {% for match in resume.key_matches.split(', ') %}
                 <span class="match-keyword">{{ match | replace('_', ' ') }}</span>
                 {% endfor %}
               </td>
+            </tr>
+            <tr class="info-row">
+                <td colspan="6" class="py-2">
+                    <p class="mb-0"><strong>Skills:</strong> {{ resume.skills }}</p>
+                    <p class="mb-0"><strong>Experience:</strong> {{ resume.experience | truncate(150) }}</p>
+                    <p class="mb-0"><strong>Education:</strong> {{ resume.education }}</p>
+                </td>
             </tr>
             {% endfor %}
           </tbody>
@@ -165,7 +188,7 @@
     </div>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Initialize tooltips (for the table headers)
+        // Initialize tooltips
         var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
         var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
           return new bootstrap.Tooltip(tooltipTriggerEl)
