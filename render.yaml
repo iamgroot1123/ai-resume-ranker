@@ -7,22 +7,16 @@ services:
       pip install -r requirements.txt
       python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
     
-    # Start command uses gunicorn to run the Flask application via wsgi.py.
-    # --timeout 300: Gives the app more time to load the SBERT model on startup.
-    # --workers 1: Crucial. Running multiple workers (the default) will cause the SBERT model to be loaded multiple times, quickly exceeding RAM limits.
-    startCommand: gunicorn --workers 1 --bind 0.0.0.0:$PORT wsgi:app
+    # Start command runs the Streamlit application
+    startCommand: streamlit run streamlit_app.py --server.port $PORT --server.enableCORS false --server.enableXsrfProtection false
     
     # Environment Variables
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.12 # Specify a stable Python version
-      - key: FLASK_ENV
-        value: production
-      # Optional: Set this to true if you are debugging a cold-start issue
-      # - key: DEBUG
-      #   value: 'True'
+        value: 3.10.12
+      - key: PORT
+        value: 10000
     
     # Scaling/Resource Management (CRITICAL FOR SBERT)
-    # The 'standard' plan (512MB RAM) often fails to load SBERT.
-    # You MUST select a plan with at least 1GB or more RAM (e.g., 'pro' or a higher tier).
+    # Recommended plan: 'pro' (1GB+ RAM) to support the large SBERT model (all-mpnet-base-v2).
     plan: pro
