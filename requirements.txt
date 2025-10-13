@@ -7,4 +7,3 @@ PyPDF2
 pdfplumber
 nltk
 openai
-gunicorn
