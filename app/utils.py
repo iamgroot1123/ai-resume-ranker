@@ -12,6 +12,8 @@ from typing import Dict, Any, List
 import sqlite3
 from pathlib import Path
 import time
+import openai
+import json
 import streamlit as st 
 
 nltk.download('stopwords', quiet=True)
@@ -146,7 +148,7 @@ def clean_text(text):
     return text or "No content"
 
 # --- Structured Data Extraction (ULTIMATE FIX implementation) ---
-
+# --- Structured Data Extraction (ULTIMATE FIX implementation) ---
 def extract_section_text(text: str, section_name: str, next_section_names: List[str]) -> str:
     """Extracts text content for a specific section (e.g., 'Education') using a pattern that prioritizes stop words."""
     
@@ -179,21 +181,26 @@ def extract_section_text(text: str, section_name: str, next_section_names: List[
 
 def parse_resume_sections(text: str) -> Dict[str, str]:
     """Extracts Skills, Experience, and Education from raw resume text."""
-    
+
     ALL_SECTIONS = [
         "SKILLS", "TECHNICAL SKILLS", "EXPERIENCE", "WORK HISTORY", "PROFESSIONAL EXPERIENCE", 
         "EDUCATION", "PROJECTS", "CERTIFICATION", "ACHIEVEMENTS", "SUMMARY", "CONTACT", "REFERENCES"
     ]
-    
+
     # --- 1. Extract Education ---
     education_text = extract_section_text(text, "EDUCATION", ALL_SECTIONS)
-    education_pattern = r'((?:b\.\s?tech|m\.\s?s|ph\.\s?d|bachelor|master|degree|diploma|college|university)[\s\w\d,&-]*?\d{4})'
-    education_mentions = [match.strip() for match in re.findall(education_pattern, education_text, re.IGNORECASE)]
-    
+    if education_text == "Not Found":
+        education_text = extract_section_text(text, "ACADEMIC QUALIFICATIONS", ALL_SECTIONS)
+
+    # Improved education pattern
+    education_pattern = r'((?:B\.\s?Tech|M\.\s?S|Ph\.\s?D|Bachelor|Master|Degree|Diploma|College|University)[\s\w\d,&-]*?(?:\d{4}|\d{2,4}[-\/]\d{2,4}))'
+    education_mentions = [match.strip() for match in re.findall(education_pattern, education_text, re.IGNORECASE) if match.strip()]
+
     # --- 2. Extract Experience (Work History) ---
     experience_text = extract_section_text(text, "PROFESSIONAL EXPERIENCE", ALL_SECTIONS)
     if experience_text == "Not Found":
         experience_text = extract_section_text(text, "WORK EXPERIENCE", ALL_SECTIONS)
+
     if experience_text == "Not Found":
         experience_text = extract_section_text(text, "EXPERIENCE", ALL_SECTIONS)
     
@@ -211,7 +218,7 @@ def parse_resume_sections(text: str) -> Dict[str, str]:
     cleaned_skills_text = re.sub(SUB_HEADER_PATTERN, ' ', skills_text, flags=re.IGNORECASE | re.MULTILINE).strip()
     
     universal_skills = re.sub(r'[\r\n]+', ', ', cleaned_skills_text).strip()
-    
+
     # Fallback (optional) - Removed for now to ensure section logic is fully verified.
     
     return {
@@ -220,7 +227,45 @@ def parse_resume_sections(text: str) -> Dict[str, str]:
         "skills": universal_skills if universal_skills and universal_skills != "Not Found" else "Not specified"
     }
 
+# --- LLM-based Scoring and Justification ---
+def get_llm_score_and_justification(resume_text: str, job_desc_text: str, api_key: str) -> (float, str):
+    """
+    Uses OpenAI's GPT model to score and generate a justification for a resume against a job description.
+    """
+    if not api_key:
+        return 0.0, "OpenAI API key not provided."
 
+    openai.api_key = api_key
+    
+    prompt = f"""
+    You are an expert technical recruiter. Your task is to evaluate a candidate's resume against a job description.
+    Provide a "fit_score" from 1.0 to 10.0, where 10.0 is a perfect match.
+    Also, provide a concise "justification" (2-3 sentences) explaining your reasoning, highlighting key strengths or gaps.
+
+    Return your response ONLY as a valid JSON object with two keys: "fit_score" and "justification".
+
+    --- JOB DESCRIPTION ---
+    {job_desc_text}
+
+    --- RESUME ---
+    {resume_text}
+    """
+
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        
+        result_text = response.choices[0].message.content
+        result_json = json.loads(result_text)
+        
+        score = float(result_json.get("fit_score", 0.0))
+        justification = result_json.get("justification", "Could not parse justification from LLM response.")
+        return score, justification
+    except Exception as e:
+        return 0.0, f"LLM API call failed: {str(e)}"
 # --- Ranking and Similarity Logic (MODIFIED for Streamlit) ---
 
 def vectorize_texts_sbert(texts, model, batch_size=100):
@@ -296,7 +341,7 @@ def extract_key_matches(resume_text, job_desc_text, top_n=3):
     return [match.replace(" ", "_") for match in matches] if matches else ["No significant matches"]
 
 
-def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model):
+def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model, api_key: str, use_llm: bool):
     """Rank resumes against a job description, save data to DB, using the passed SBERT model."""
     
     if not model:
@@ -355,22 +400,38 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model):
     
     df_filtered = filter_resumes(df, keywords, job_desc_text)
     top_n = min(top_n, len(df_filtered))
-    resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model)
-    similarities = cosine_similarity(resume_vectors, job_vector.reshape(1, -1)).flatten()
-    df_filtered.loc[:, "similarity"] = similarities
-    top_resumes = df_filtered.sort_values(by="similarity", ascending=False).head(top_n).copy()
+
+    # We still use SBERT for initial semantic filtering to find the most relevant candidates
+    # before sending them to the more expensive LLM API.
+    if not df_filtered.empty:
+        resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model)
+        similarities = cosine_similarity(resume_vectors, job_vector.reshape(1, -1)).flatten()
+        df_filtered.loc[:, "similarity"] = similarities
     
     final_top_resumes = []
     
-    for index, row in top_resumes.iterrows():
+    # Sort by SBERT similarity first to select the best candidates for the LLM
+    candidates_for_llm = df_filtered.sort_values(by="similarity", ascending=False).head(top_n).copy()
+
+    for index, row in candidates_for_llm.iterrows():
         original_entry = df[df["ID"] == row["ID"]].iloc[0]
         original_resume_text = original_entry["Resume_str"]
         parsed_info = original_entry["parsed_data"]
 
         matches = extract_key_matches(original_resume_text, job_desc_text)
         
-        rating_10 = 1 + round(row["similarity"] * 9, 1) 
-        justification = f"Strong alignment on key terms like: {', '.join(matches).replace('_', ' ')}."
+        if use_llm:
+            # --- NEW: Call LLM for score and justification ---
+            rating_10, justification = get_llm_score_and_justification(original_resume_text, job_desc_text, api_key)
+
+            # --- FALLBACK: If LLM fails (e.g., quota error), use SBERT score ---
+            if rating_10 == 0.0 and "LLM API call failed" in justification:
+                # Use the SBERT similarity to calculate a fallback score
+                rating_10 = 1 + round(row["similarity"] * 9, 1)
+        else:
+            # --- ORIGINAL METHOD: Use SBERT for score and TF-IDF for justification ---
+            rating_10 = 1 + round(row["similarity"] * 9, 1)
+            justification = f"Strong alignment on key terms like: {', '.join(matches).replace('_', ' ')}."
 
         final_top_resumes.append({
             "ID": row["ID"],
@@ -384,4 +445,9 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model):
             "education": parsed_info["education"],
         })
 
-    return pd.DataFrame(final_top_resumes), None
+    if not final_top_resumes:
+        return pd.DataFrame(), "No candidates found after filtering."
+
+    # Final ranking is now based on the LLM's score
+    final_df = pd.DataFrame(final_top_resumes).sort_values(by="rating_10", ascending=False)
+    return final_df, None

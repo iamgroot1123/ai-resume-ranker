@@ -39,6 +39,15 @@ def ranker_page():
         if st.button("View Stored Database 💾", use_container_width=True):
             set_page('database')
         st.markdown("---")
+        st.header("LLM Configuration")
+        st.session_state.use_llm = st.checkbox("Use LLM for Advanced Ranking", value=False, help="If checked, uses GPT for scoring and justification, which requires a valid OpenAI API key.")
+        st.session_state.openai_api_key = st.text_input(
+            "OpenAI API Key", 
+            type="password",
+            help="Required for LLM-based ranking. Your key is not stored.",
+            disabled=not st.session_state.use_llm
+        )
+        st.markdown("Get your key from [OpenAI](https://platform.openai.com/api-keys).")
         
         
     # --- Input Form ---
@@ -125,18 +134,23 @@ def ranker_page():
             rank_error = "Please upload at least one resume."
         elif model is None:
             rank_error = "The SBERT model failed to load. Cannot rank."
+        elif st.session_state.get("use_llm") and not st.session_state.get("openai_api_key"):
+            rank_error = "OpenAI API Key is required for LLM ranking. Please enter it or uncheck 'Use LLM'."
         
         
         if rank_error:
             st.error(rank_error)
         else:
             with st.spinner('Ranking candidates and extracting structured data...'):
+                # Pass the API key to the ranking function
                 top_resumes_df, error = rank_resumes(
                     job_desc_text=final_job_desc,
                     keywords=keywords,
                     top_n=top_n,
                     uploaded_resumes=valid_resume_files,
-                    model=model
+                    model=model,
+                    api_key=st.session_state.openai_api_key,
+                    use_llm=st.session_state.use_llm
                 )
             
             # The 'error' returned from rank_resumes is now used here
@@ -161,25 +175,32 @@ def display_results(df, job_desc):
             st.markdown(f"**Email:** `{row['email']}` | **SBERT Similarity:** `{row['similarity']:.4f}`")
             st.markdown(f"**Justification:** {row['justification']}")
             
-            # Key Matches
-            matches_html = " ".join([f'<span style="background-color: #d1e7dd; color: #0f5132; padding: 4px 8px; border-radius: 4px; margin-right: 5px; font-size: 0.9em; font-weight: 600;">{match.replace("_", " ")}</span>' 
-                                     for match in row['key_matches'].split(', ')])
-            st.markdown(f"**Key Matching Terms:** {matches_html}", unsafe_allow_html=True)
-            
+            # Only show Key Matching Terms if LLM is used, as it's redundant otherwise.
+            if st.session_state.get("use_llm", False):
+                matches_html = " ".join([f'<span style="background-color: #d1e7dd; color: #0f5132; padding: 4px 8px; border-radius: 4px; margin-right: 5px; font-size: 0.9em; font-weight: 600;">{match.replace("_", " ")}</span>' 
+                                         for match in row['key_matches'].split(', ')])
+                st.markdown(f"**Key Matching Terms:** {matches_html}", unsafe_allow_html=True)
+
             st.markdown("---")
-            st.subheader("Extracted Structured Data (Feature 1)")
             
             col_s, col_e, col_ed = st.columns(3)
-            
-            # Structured Data (Handling the current "Not specified" gracefully)
-            col_s.metric("Skills", "Extracted" if row['skills'] != "Not specified" else "❌ Failed", help=row['skills'])
-            col_s.caption(f"Details: {row['skills']}")
-            
-            col_e.metric("Experience", "Extracted" if row['experience'] != "Not specified" else "❌ Failed", help=row['experience'])
-            col_e.caption(f"Details: {row['experience']}")
 
-            col_ed.metric("Education", "Extracted" if row['education'] != "Not specified" else "❌ Failed", help=row['education'])
-            col_ed.caption(f"Details: {row['education']}")
+            # --- Structured Data Display (Replaced st.metric for better text display) ---
+            def display_structured_data(column, title, data):
+                with column:
+                    if data != "Not specified":
+                        st.markdown(f"**{title}**")
+                        st.markdown(f'<p style="font-size: 1.1em; color: #28a745; margin: 0;">✔ Extracted</p>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"**{title}**")
+                        st.markdown(f'<p style="font-size: 1.1em; color: #dc3545; margin: 0;">❌ Failed</p>', unsafe_allow_html=True)
+                    
+                    # Display details directly using st.caption (cannot nest expanders)
+                    st.caption(data)
+
+            display_structured_data(col_s, "Skills", row['skills'])
+            display_structured_data(col_e, "Experience", row['experience'])
+            display_structured_data(col_ed, "Education", row['education'])
 
     # --- Download ---
     csv_buffer = BytesIO()
