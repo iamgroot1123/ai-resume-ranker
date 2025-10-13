@@ -1,0 +1,5 @@
+ID,similarity,email,key_matches
+Resume1.pdf,0.7624815106391907,john.doe@email.com,"learning, data, computer"
+Resume2.pdf,0.6823537349700928,jane.smith@email.com,"learning, machine, machine_learning"
+Resume3.pdf,0.5780224800109863,alex.lee@email.com,"data, learning, computer"
+resume.pdf,0.440434992313385,2306madhu@gmail.com,"data, cloud, ml"

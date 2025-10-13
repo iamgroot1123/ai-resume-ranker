@@ -3,6 +3,10 @@ import pandas as pd
 import os
 from utils import load_model_once, rank_resumes, get_all_parsed_resumes
 from io import BytesIO
+from dotenv import load_dotenv
+
+# --- Load Environment Variables ---
+load_dotenv()
 
 # --- Configuration ---
 st.set_page_config(layout="wide", page_title="AI-Powered Resume Ranker")
@@ -45,10 +49,13 @@ def ranker_page():
             set_page('database')
         st.markdown("---")
         st.header("LLM Configuration")
-        st.session_state.use_llm = st.checkbox("Use LLM for Advanced Ranking", value=False, help="If checked, uses GPT for scoring and justification, which requires a valid OpenAI API key.")
+        # Try to read the API key from environment variables first
+        default_api_key = os.getenv("OPENAI_API_KEY", "")
+        st.session_state.use_llm = st.checkbox("Use LLM for Advanced Ranking", value=bool(default_api_key), help="If checked, uses GPT for scoring and justification, which requires a valid OpenAI API key.")
         st.session_state.openai_api_key = st.text_input(
             "OpenAI API Key", 
             type="password",
+            value=default_api_key,
             help="Required for LLM-based ranking. Your key is not stored.",
             disabled=not st.session_state.use_llm
         )

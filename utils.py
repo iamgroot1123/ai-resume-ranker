@@ -435,6 +435,8 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model, api_ke
             if rating_10 == 0.0 and "LLM API call failed" in justification:
                 # Use the SBERT similarity to calculate a fallback score
                 rating_10 = 1 + round(row["similarity"] * 9, 1)
+                # Provide a user-friendly fallback justification
+                justification = f"LLM call failed. Falling back to SBERT => Strong alignment on key terms like: {', '.join(matches).replace('_', ' ')}."
         else:
             # --- ORIGINAL METHOD: Use SBERT for score and TF-IDF for justification ---
             rating_10 = 1 + round(row["similarity"] * 9, 1)
