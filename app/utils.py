@@ -300,13 +300,16 @@ def extract_keywords_from_job_desc(job_desc_text, top_n=10):
 
 def filter_resumes(df, keywords, job_desc_text):
     # ... existing implementation ...
+    # Check if user provided any keywords
     if isinstance(keywords, str) and keywords.strip():
         keywords_list = [k.strip().lower() for k in keywords.split(",")]
+        # Apply a strict filter: only resumes matching user keywords are kept.
+        # If no resumes match, an empty DataFrame is returned.
+        filtered_df = df[df["Resume_str"].str.lower().str.contains("|".join(keywords_list), na=False)].copy()
+        return filtered_df
     else:
-        keywords_list = extract_keywords_from_job_desc(job_desc_text)
-    
-    filtered_df = df[df["Resume_str"].str.lower().str.contains("|".join(keywords_list), na=False)].copy()
-    return filtered_df if not filtered_df.empty else df
+        # If no keywords are provided by the user, return the original DataFrame without filtering.
+        return df
 
 def extract_key_matches(resume_text, job_desc_text, top_n=3):
     # ... existing implementation ...
@@ -399,6 +402,10 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model, api_ke
     df = pd.DataFrame(data)
     
     df_filtered = filter_resumes(df, keywords, job_desc_text)
+    
+    if df_filtered.empty:
+        return pd.DataFrame(), "No resumes found that match the specified keywords."
+        
     top_n = min(top_n, len(df_filtered))
 
     # We still use SBERT for initial semantic filtering to find the most relevant candidates
