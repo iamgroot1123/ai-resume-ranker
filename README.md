@@ -4,7 +4,8 @@ The AI-Powered Resume Ranker is a sophisticated web application that automates r
 
 The application now runs as a single-page dashboard built with **Streamlit**, offering stability, data persistence, and a modern user experience.
 
-Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). **Note: The first launch may take 2-3 minutes due to the large SBERT model loading into memory.**
+Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). **Note: The initial page load may take 2-3 minutes. This delay is due to the service performing a cold start.**
+
 
 ## Features
 
