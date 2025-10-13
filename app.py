@@ -19,6 +19,11 @@ def set_page(page_name):
 
 if 'page' not in st.session_state:
     st.session_state['page'] = 'ranker'
+# --- Initialize state for persisting results ---
+if 'ranked_resumes' not in st.session_state:
+    st.session_state.ranked_resumes = None
+if 'job_desc_for_results' not in st.session_state:
+    st.session_state.job_desc_for_results = None
 
 
 # ==============================================================================
@@ -113,6 +118,10 @@ def ranker_page():
     st.markdown("---")
     
     if st.button("Rank Resumes", type="primary", use_container_width=True):
+        # Clear previous results when starting a new ranking
+        st.session_state.ranked_resumes = None
+        st.session_state.job_desc_for_results = None
+        st.session_state.selected_resumes = [] # Also clear selections
         
         # --- FIX 1: Initializing rank_error (from previous step) ---
         rank_error = None
@@ -158,20 +167,54 @@ def ranker_page():
                 st.error(error)
             elif top_resumes_df.empty:
                 st.warning("No matching resumes found after keyword filtering or ranking.")
+                st.session_state.ranked_resumes = None # Ensure state is cleared
             else:
                 st.success(f"Successfully ranked {len(top_resumes_df)} resumes.")
-                display_results(top_resumes_df, final_job_desc)
+                # --- Store results in session state to persist ---
+                st.session_state.ranked_resumes = top_resumes_df
+                st.session_state.job_desc_for_results = final_job_desc
 
-
+    # --- Display results if they exist in the session state ---
+    if st.session_state.ranked_resumes is not None and not st.session_state.ranked_resumes.empty:
+        display_results(st.session_state.ranked_resumes, st.session_state.job_desc_for_results)
 
 def display_results(df, job_desc):
-    st.subheader(f"🏆 Top {len(df)} Candidates")
-    st.markdown(f"**Job Description Snippet:** _{job_desc[:200]}..._")
+    st.subheader(f"🏆 Top {len(df)} Candidates Found")
+    st.markdown("---")
 
+    # --- Selection Logic ---
+    st.markdown("#### Select Resumes to Download")
+    st.info("Use the checkboxes below to select which candidates to include in the downloaded CSV file.")
+
+    # Initialize session state for selected resumes
+    if 'selected_resumes' not in st.session_state:
+        st.session_state.selected_resumes = []
+
+    all_ids = df['ID'].tolist()
+
+    # "Select All" checkbox
+    select_all = st.checkbox("Select All Resumes", value=(len(st.session_state.selected_resumes) == len(all_ids) and len(all_ids) > 0))
+
+    # --- Improved Checkbox Logic ---
+    # This logic now correctly handles individual selections after "Select All" is used.
+    if select_all:
+        st.session_state.selected_resumes = all_ids
+    else:
+        # If "Select All" was previously checked and is now unchecked, clear all selections.
+        # This prevents it from re-selecting everything on the next run.
+        if set(st.session_state.selected_resumes) == set(all_ids) and len(all_ids) > 0:
+            st.session_state.selected_resumes = []
+
+    # Process individual checkboxes
     for index, row in df.iterrows():
         rank = index + 1
-        
-        with st.expander(f"#{rank} | {row['ID']} | Fit Score: {row['rating_10']} / 10", expanded=rank <= 3):
+        is_selected = st.checkbox(f"Select {row['ID']}", value=row['ID'] in st.session_state.selected_resumes, key=f"cb_{row['ID']}")
+        if is_selected and row['ID'] not in st.session_state.selected_resumes:
+            st.session_state.selected_resumes.append(row['ID'])
+        elif not is_selected and row['ID'] in st.session_state.selected_resumes:
+            st.session_state.selected_resumes.remove(row['ID'])
+
+        with st.expander(f"**#{rank} | {row['ID']}** | Fit Score: **{row['rating_10']} / 10**", expanded=rank <= 3):
             st.markdown(f"**Email:** `{row['email']}` | **SBERT Similarity:** `{row['similarity']:.4f}`")
             st.markdown(f"**Justification:** {row['justification']}")
             
@@ -202,16 +245,25 @@ def display_results(df, job_desc):
             display_structured_data(col_e, "Experience", row['experience'])
             display_structured_data(col_ed, "Education", row['education'])
 
+    # --- Filter DataFrame based on selection ---
+    selected_df = df[df['ID'].isin(st.session_state.selected_resumes)]
+
     # --- Download ---
-    csv_buffer = BytesIO()
-    df.to_csv(csv_buffer, index=False)
-    st.download_button(
-        label="Download Full Ranking CSV",
-        data=csv_buffer.getvalue(),
-        file_name="resume_ranking_results.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
+    if not selected_df.empty:
+        csv_buffer = BytesIO()
+        selected_df.to_csv(csv_buffer, index=False)
+        st.download_button(
+            label=f"Download {len(selected_df)} Selected Resumes as CSV",
+            data=csv_buffer.getvalue(),
+            file_name="selected_resume_rankings.csv",
+            mime="text/csv",
+            use_container_width=True,
+            type="primary"
+        )
+    else:
+        st.warning("No resumes selected for download.")
+        st.download_button("Download Selected Resumes as CSV", data="", disabled=True, use_container_width=True)
+
 
 
 # ==============================================================================
