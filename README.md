@@ -1,54 +1,67 @@
-# AI-Powered Resume Ranker
+# AI-Powered Resume Ranker: Semantic Screening Dashboard 🚀
 
-The AI-Powered Resume Ranker is a web-based application that automates resume screening using natural language processing (NLP). Powered by Sentence-BERT (SBERT), it ranks resumes by semantic similarity to job descriptions, extracts email addresses, and filters candidates with keywords, removing stop words for precision. Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). Built with Flask, it supports `.pdf` and `.txt` uploads, allows users to select the number of top candidates, and provides downloadable CSV results, streamlining recruitment.
+The AI-Powered Resume Ranker is a sophisticated web application that automates resume screening using a **hybrid LLM/NLP architecture**. It provides superior ranking accuracy through **Sentence-BERT (SBERT)** and offers advanced qualification via **GPT-powered scoring and justification**.
+
+The application now runs as a single-page dashboard built with **Streamlit**, offering stability, data persistence, and a modern user experience.
+
+Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/).
 
 ## Features
-- **Semantic Ranking**: Ranks resumes using SBERT (`all-mpnet-base-v2`) with cosine similarity to job descriptions.
-- **Email Extraction**: Extracts email addresses from resumes via regex.
-- **Keyword Filtering**: Filters resumes using TF-IDF-extracted keywords, with stop words (e.g., "seeking," "summary") removed.
-- **Key Matches**: Identifies matching phrases between resumes and job descriptions using TF-IDF.
-- **User Interface**: Flask-based interface for uploading resumes and job descriptions, inputting keywords, selecting top-N resumes, and downloading CSV results.
-- **Dataset Validation**: Ensures dataset integrity by checking folder structure, PDF text extractability, and category alignment.
-- **Optimizations**: Batch processing, pre-computed embeddings, and TQDM progress bars for performance.
-- **Error Handling**: Robust handling for invalid files, empty inputs, and missing matches.
-- **Deployment**: Hosted on Render at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/).
+
+- **Hybrid Ranking (LLM/SBERT)**: Uses **SBERT** (`all-mpnet-base-v2`) for fast semantic similarity filtering, then uses an **LLM (GPT-3.5-turbo)** to generate a final, qualitative **Fit Score (1-10)** and detailed justification. Includes a fallback to SBERT scoring if the LLM API call fails.
+- **Direct Resume Download**: After ranking, users can **manually download the corresponding `.pdf` or `.txt` resume file directly from the results page** for immediate review.
+- **Strict Keyword Pre-Screening**: If keywords are entered, **only** resumes that contain at least one of the specified keywords will be considered for ranking. All others are immediately filtered out.
+- **Data Persistence (SQLite)**: Stores all parsed resume data, email, and raw text in a dedicated **SQLite database** (in-memory cache for deployment).
+- **Database Viewer**: A separate dashboard page allows users to view, search, and download all stored candidate records as a CSV.
+- **Resume Retrieval**: Candidates' original files can be downloaded directly from the results page using the file bytes stored in the database.
+- **Universal Extraction**: Attempts to extract **Skills, Experience, and Education** based on resume section headers, making the system universal for different job types.
+- **Justification & Key Matches**: Identifies the primary technical overlaps using TF-IDF and presents them as justification tags, supporting the LLM's final score.
+- **Optimized Performance**: SBERT model is loaded only once using Streamlit's `@st.cache_resource`, ensuring fast reruns after the initial load.
+
+## Technical Stack
+
+| Component               | Technology                              | Role                                                                        |
+| :---------------------- | :-------------------------------------- | :-------------------------------------------------------------------------- |
+| **Framework**           | **Streamlit**                           | Single-page application (SPA) dashboard and UI.                             |
+| **Semantic Matching**   | **Sentence-BERT** (`all-mpnet-base-v2`) | Vectorization and Cosine Similarity scoring.                                |
+| **Qualitative Scoring** | **OpenAI API (GPT-3.5-turbo)**          | LLM-based Fit Score (1-10) and natural language justification.              |
+| **Data Persistence**    | **SQLite**                              | In-memory database for storing parsed resume records (`parsed_resumes.db`). |
 
 ## Screenshots
+
 ![Upload Interface](screenshots/upload.png)
-*Upload `.pdf` or `.txt` resumes, job descriptions, keywords, and select top-N candidates.*
+_Upload job descriptions and resumes, configure LLM key, and select ranking options._
 
 ![Results Page](screenshots/results.png)
-*View ranked resumes with similarity scores and email addresses, and download results as CSV.*
+_View ranked resumes with **Fit Scores**, **justification**, and extracted **structured data**. Download selected ranking results as a CSV and **download the original resume file directly** for immediate manual review._
+
+![Database Page](screenshots/database.png)
+_Access the persistent database of all previously uploaded and parsed resumes._
 
 ## Running Locally
-1. **Run the Flask App**:
+
+1. **Install Dependencies** (Ensure Python 3.8+ is used):
    ```bash
-   python run.py
+   pip install -r requirements.txt
    ```
-2. **Access the App**:
-   - Open `http://127.0.0.1:5000` in a browser.
-   - Upload resumes and a job description, input keywords (optional), select the number of top resumes, and view/download results as CSV.
+2. **Run the Streamlit App:**:
+   - The application now runs via the single app.py script.
+   ```bash
+   streamlit run app.py
+   ```
+3. Access the App:
+   - Open the URL displayed in the terminal (typically http://localhost:8501).
+   - Note: Use of the LLM requires setting the OpenAI API key in the sidebar.
 
 ## Deployment
-The app is live at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). To deploy your own instance on Render:
-- Use `render.yaml` with `gunicorn wsgi:app`.
-- Configure environment variables (e.g., `PORT`).
-- Use `/tmp` paths for results storage.
 
-## Dataset
-The app expects a dataset with:
-- A CSV file containing resume IDs, text, and job categories.
-- PDF resumes organized by category.
-- Text files for job descriptions, named by category.
-Run `dataset_validator.py` to verify the structure:
-```bash
-python dataset_validator.py
-```
+The app is live at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). To deploy your own instance on Render:
+
+- Use `render.yaml` with `gunicorn wsgi:app`.
+- Set the OPENAI_API_KEY as an environment variable in the deployment settings for LLM functionality.
 
 ## Limitations
-- **Missing Categories**: Some job categories may be absent, limiting ranking for those roles.
-- **Scanned PDFs**: Non-text-extractable PDFs require OCR (not implemented).
-- **Pre-trained Model**: Uses `all-mpnet-base-v2` without fine-tuning, which may impact domain-specific accuracy.
 
-## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+- **PDF Extraction**: Complex table layouts or scanned PDFs may still yield inconsistent text for structured data fields (Experience, Education).
+- **API Dependency**: LLM ranking requires a valid OpenAI API Key.
+- **Pre-trained Model**: The base SBERT model is not fine-tuned on recruiting data.
