@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from app.utils import load_model_once, rank_resumes, get_all_parsed_resumes
+from utils import load_model_once, rank_resumes, get_all_parsed_resumes
 from io import BytesIO
 
 # --- Configuration ---

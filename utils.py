@@ -19,7 +19,7 @@ import streamlit as st
 nltk.download('stopwords', quiet=True)
 
 # --- Database Initialization (Feature 2) ---
-DATABASE_PATH = Path(__file__).resolve().parent.parent / "Results" / "parsed_resumes.db"
+DATABASE_PATH = Path(__file__).resolve().parent / "Results" / "parsed_resumes.db"
 
 def init_db():
     """Initializes the SQLite database and the parsed_resumes table."""
