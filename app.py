@@ -1,9 +1,11 @@
 import streamlit as st
 import pandas as pd
 import os
-from utils import load_model_once, rank_resumes, get_all_parsed_resumes
+from utils import load_model_once, rank_resumes, get_all_parsed_resumes, init_db, get_resume_bytes_from_db
 from io import BytesIO
+import base64
 from dotenv import load_dotenv
+import sqlite3
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -11,10 +13,21 @@ load_dotenv()
 # --- Configuration ---
 st.set_page_config(layout="wide", page_title="AI-Powered Resume Ranker")
 
-# --- Model Loading (Cached) ---
+# --- Resource Caching ---
+@st.cache_resource
+def get_db_connection(version="1.1"):
+    """Creates and caches an in-memory SQLite database connection for the session."""
+    # Using ":memory:" creates a temporary, in-memory database
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    st.write(f"Initializing DB v{version}...") # Helpful for debugging
+    init_db(conn) # Initialize the table structure on the new connection
+    return conn
+
 model = load_model_once()
+db_conn = get_db_connection()
+
 if model is None:
-    st.error("Model loading failed. Please check dependencies and memory allocation.")
+    st.error("SBERT model loading failed. Please check dependencies and memory allocation.")
 
 
 # --- Page Navigation ---
@@ -168,7 +181,8 @@ def ranker_page():
                     uploaded_resumes=valid_resume_files,
                     model=model,
                     api_key=st.session_state.openai_api_key,
-                    use_llm=st.session_state.use_llm
+                    use_llm=st.session_state.use_llm,
+                    db_conn=db_conn # Pass the session's DB connection
                 )
             
             # The 'error' returned from rank_resumes is now used here
@@ -187,10 +201,12 @@ def ranker_page():
     if st.session_state.ranked_resumes is not None and not st.session_state.ranked_resumes.empty:
         display_results(st.session_state.ranked_resumes, st.session_state.job_desc_for_results)
 
+
+
 def display_results(df, job_desc):
     st.subheader(f"🏆 Top {len(df)} Candidates Found")
     st.markdown("---")
-
+    
     # --- Selection Logic ---
     st.markdown("#### Select Resumes to Download")
     st.info("Use the checkboxes below to select which candidates to include in the downloaded CSV file.")
@@ -201,31 +217,47 @@ def display_results(df, job_desc):
 
     all_ids = df['ID'].tolist()
 
-    # "Select All" checkbox
-    select_all = st.checkbox("Select All Resumes", value=(len(st.session_state.selected_resumes) == len(all_ids) and len(all_ids) > 0))
-
-    # --- Improved Checkbox Logic ---
-    # This logic now correctly handles individual selections after "Select All" is used.
-    if select_all:
-        st.session_state.selected_resumes = all_ids
-    else:
-        # If "Select All" was previously checked and is now unchecked, clear all selections.
-        # This prevents it from re-selecting everything on the next run.
-        if set(st.session_state.selected_resumes) == set(all_ids) and len(all_ids) > 0:
+    # --- Corrected "Select All" Checkbox Logic ---
+    # This logic is more robust and prevents unnecessary reruns that clear state.
+    def on_select_all_change():
+        if st.session_state.select_all_checkbox:
+            st.session_state.selected_resumes = all_ids
+        else:
             st.session_state.selected_resumes = []
+            
+    st.checkbox("Select All Resumes", key='select_all_checkbox', on_change=on_select_all_change)
 
     # Process individual checkboxes
     for index, row in df.iterrows():
         rank = index + 1
-        is_selected = st.checkbox(f"Select {row['ID']}", value=row['ID'] in st.session_state.selected_resumes, key=f"cb_{row['ID']}")
+        is_selected = st.checkbox(f"Select {row['ID']}", value=(row['ID'] in st.session_state.selected_resumes), key=f"cb_{row['ID']}")
         if is_selected and row['ID'] not in st.session_state.selected_resumes:
             st.session_state.selected_resumes.append(row['ID'])
         elif not is_selected and row['ID'] in st.session_state.selected_resumes:
             st.session_state.selected_resumes.remove(row['ID'])
 
         with st.expander(f"**#{rank} | {row['ID']}** | Fit Score: **{row['rating_10']} / 10**", expanded=rank <= 3):
-            st.markdown(f"**Email:** `{row['email']}` | **SBERT Similarity:** `{row['similarity']:.4f}`")
-            st.markdown(f"**Justification:** {row['justification']}")
+            
+            col_header1, col_header2 = st.columns([3, 1])
+            with col_header1:
+                st.markdown(f"**Email:** `{row['email']}` | **SBERT Similarity:** `{row['similarity']:.4f}`")
+                st.markdown(f"**Justification:** {row['justification']}")
+            with col_header2:
+                file_bytes = get_resume_bytes_from_db(db_conn, row['ID'])
+                if file_bytes:
+                    if row['ID'].lower().endswith('.pdf'):
+                        mime_type = "application/pdf"
+                    else:
+                        mime_type = "text/plain"
+                    st.download_button(
+                        label="📄 Download Resume",
+                        data=file_bytes,
+                        file_name=row['ID'],
+                        mime=mime_type,
+                        key=f"download_{row['ID']}"
+                    )
+                else:
+                    st.write("File not found")
             
             st.markdown("---")
             
@@ -250,7 +282,6 @@ def display_results(df, job_desc):
 
     # --- Filter DataFrame based on selection ---
     selected_df = df[df['ID'].isin(st.session_state.selected_resumes)]
-
     # --- Download ---
     if not selected_df.empty:
         csv_buffer = BytesIO()
@@ -284,7 +315,7 @@ def database_viewer_page():
         st.markdown("---")
 
     # --- Data Retrieval ---
-    resumes_data = get_all_parsed_resumes()
+    resumes_data = get_all_parsed_resumes(db_conn) # Use the session's DB connection
     
     if resumes_data:
         st.success(f"Total Resumes Stored: {len(resumes_data)}")

@@ -18,14 +18,9 @@ import streamlit as st
 
 nltk.download('stopwords', quiet=True)
 
-# --- Database Initialization (Feature 2) ---
-DATABASE_PATH = Path(__file__).resolve().parent / "Results" / "parsed_resumes.db"
-
-def init_db():
+def init_db(conn):
     """Initializes the SQLite database and the parsed_resumes table."""
-    conn = None
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS parsed_resumes (
@@ -35,6 +30,7 @@ def init_db():
                 skills TEXT,
                 experience TEXT,
                 education TEXT,
+                file_bytes BLOB,
                 raw_text TEXT,
                 upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -42,48 +38,37 @@ def init_db():
         conn.commit()
     except sqlite3.Error as e:
         print(f"Database error during initialization: {e}")
-    finally:
-        if conn:
-            conn.close()
 
-def save_parsed_resume(data: Dict[str, Any]):
+def save_parsed_resume(conn, data: Dict[str, Any]):
     """Saves parsed resume data (or updates it) to the database."""
-    conn = None
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO parsed_resumes (filename, email, skills, experience, education, raw_text)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO parsed_resumes (filename, email, skills, experience, education, raw_text, file_bytes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             data["ID"],
             data["email"],
             data["parsed_data"]["skills"],
             data["parsed_data"]["experience"],
             data["parsed_data"]["education"],
-            data["Resume_str"]
+            data["Resume_str"],
+            data["file_bytes"]
         ))
         conn.commit()
     except sqlite3.Error as e:
         print(f"Error saving resume {data['ID']} to DB: {e}")
-    finally:
-        if conn:
-            conn.close()
 
-init_db() 
-
-
-def get_all_parsed_resumes():
+def get_all_parsed_resumes(conn):
     """Retrieves all records from the parsed_resumes table."""
-    conn = None
     resumes = []
     try:
-        conn = sqlite3.connect(DATABASE_PATH)
-        conn.row_factory = sqlite3.Row 
+        # Set row_factory here to get dict-like rows
+        conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
         
         cursor.execute("""
-            SELECT filename, email, skills, experience, education, upload_date 
+            SELECT filename, email, skills, experience, education, upload_date
             FROM parsed_resumes 
             ORDER BY upload_date DESC
         """)
@@ -91,14 +76,25 @@ def get_all_parsed_resumes():
         for row in cursor.fetchall():
             resumes.append(dict(row))
         
-        cursor.close()
-        
     except sqlite3.Error as e:
         print(f"Database error during retrieval: {e}")
-    finally:
-        if conn:
-            conn.close()
     return resumes
+
+def get_resume_bytes_from_db(conn, filename: str) -> bytes:
+    """Retrieves the file_bytes for a single resume from the database."""
+    file_bytes = None
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT file_bytes FROM parsed_resumes WHERE filename = ?", (filename,)
+        )
+        result = cursor.fetchone()
+        if result:
+            file_bytes = result[0]
+    except sqlite3.Error as e:
+        print(f"Database error retrieving bytes for {filename}: {e}")
+    return file_bytes
+
 
 
 # --- LLM/SBERT Model Loading (MODIFIED for Streamlit) ---
@@ -344,62 +340,19 @@ def extract_key_matches(resume_text, job_desc_text, top_n=3):
     return [match.replace(" ", "_") for match in matches] if matches else ["No significant matches"]
 
 
-def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model, api_key: str, use_llm: bool):
+def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model, api_key: str, use_llm: bool, db_conn):
     """Rank resumes against a job description, save data to DB, using the passed SBERT model."""
     
     if not model:
         return None, "SBERT model not loaded. Please ensure the model is downloaded."
-    
+
+    # --- Refactor: Use process_uploaded_files to handle all file reading and parsing ---
+    df = process_uploaded_files(uploaded_resumes, db_conn)
+    if df.empty:
+        return None, "No valid resumes uploaded or processed."
+
     job_desc_text = clean_text(job_desc_text.strip() or "No content")
     job_vector = vectorize_texts_sbert([job_desc_text], model)[0]
-    
-    data = []
-    
-    for resume in uploaded_resumes:
-        # Check if the object is None or has no filename attribute before proceeding.
-        # This handles cases where Streamlit might pass a placeholder object.
-        if resume is None or not hasattr(resume, 'name'): # FIX: Check for 'name' attribute
-            continue
-        # --- END FIX ---
-        
-        filename = resume.name # FIX: Use 'name' attribute for Streamlit UploadedFile
-        try:
-            resume.seek(0) 
-            if filename.lower().endswith(".txt"):
-                text = resume.getvalue().decode("utf-8", errors="ignore").strip() or "No content"
-            elif filename.lower().endswith(".pdf"):
-                text = extract_text_from_pdf(resume)
-            else:
-                continue
-            
-            # ... (rest of the try/except block is unchanged) ...
-            
-            email = extract_email(text)
-            parsed_info = parse_resume_sections(text)
-            
-            entry = {
-                "ID": filename,
-                "Resume_str": text,
-                "email": email,
-                "parsed_data": parsed_info
-            }
-            data.append(entry)
-            
-            # --- Save Parsed Data to DB ---
-            save_parsed_resume(entry) 
-            # --- END Save ---
-            
-        except Exception as e:
-            # You might want to remove the print statement in a production environment
-            # but keep it for debugging unexpected files.
-            print(f"Error processing file {filename}: {e}")
-            continue
-
-    if not data:
-        return None, "No valid resumes uploaded or processed."
-    
-    
-    df = pd.DataFrame(data)
     
     df_filtered = filter_resumes(df, keywords, job_desc_text)
     
@@ -460,3 +413,44 @@ def rank_resumes(job_desc_text, keywords, top_n, uploaded_resumes, model, api_ke
     # Final ranking is now based on the LLM's score
     final_df = pd.DataFrame(final_top_resumes).sort_values(by="rating_10", ascending=False)
     return final_df, None
+
+def process_uploaded_files(uploaded_resumes, conn):
+    """
+    Processes uploaded files to extract text, email, parsed data, and file bytes.
+    This function is designed to be called once to avoid re-reading files.
+    """
+    data = []
+    for resume in uploaded_resumes:
+        if resume is None or not hasattr(resume, 'name') or resume.size == 0:
+            continue
+        
+        filename = resume.name
+        try:
+            resume.seek(0)
+            file_bytes = resume.getvalue() # Read bytes once
+            
+            if filename.lower().endswith(".txt"):
+                text = file_bytes.decode("utf-8", errors="ignore").strip() or "No content"
+            elif filename.lower().endswith(".pdf"):
+                text = extract_text_from_pdf(resume)
+            else:
+                continue
+
+            email = extract_email(text)
+            parsed_info = parse_resume_sections(text)
+            
+            entry = {
+                "ID": filename,
+                "Resume_str": text,
+                "email": email,
+                "parsed_data": parsed_info,
+                "file_bytes": file_bytes # Store bytes
+            }
+            data.append(entry)
+            save_parsed_resume(conn, entry)
+            
+        except Exception as e:
+            print(f"Error processing file {filename}: {e}")
+            continue
+    
+    return pd.DataFrame(data) if data else pd.DataFrame()
