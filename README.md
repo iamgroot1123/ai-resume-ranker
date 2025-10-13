@@ -4,7 +4,7 @@ The AI-Powered Resume Ranker is a sophisticated web application that automates r
 
 The application now runs as a single-page dashboard built with **Streamlit**, offering stability, data persistence, and a modern user experience.
 
-Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/).
+Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). **Note: The first launch may take 2-3 minutes due to the large SBERT model loading into memory.**
 
 ## Features
 
@@ -57,7 +57,7 @@ _Access the persistent database of all previously uploaded and parsed resumes._
 
 The app is live at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). To deploy your own instance on Render:
 
-- Use `render.yaml` with `gunicorn wsgi:app`.
+- **Corrected Start Command**: The deployment command is designed for Render's environment.
 - Set the OPENAI_API_KEY as an environment variable in the deployment settings for LLM functionality.
 
 ## Limitations
