@@ -8,7 +8,7 @@ services:
       python -c "import nltk; nltk.download('stopwords'); nltk.download('punkt')"
     
     # Start command runs the Streamlit application
-    startCommand: streamlit run streamlit_app.py --server.port $PORT --server.enableCORS false --server.enableXsrfProtection false
+    startCommand: streamlit run app.py --server.port $PORT --server.enableCORS false --server.enableXsrfProtection false
     
     # Environment Variables
     envVars:
