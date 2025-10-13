@@ -8,3 +8,7 @@ __pycache__/
 # Virtual environment
 venv/
 .venv/
+
+# Project specific
+Results/
+*.csv
