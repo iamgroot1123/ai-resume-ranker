@@ -1,5 +1,4 @@
 [server]
 headless = true           # Run Streamlit without opening a browser
-port = $PORT              # Use the port provided by Render
 enableCORS = true         # Keep CORS protection enabled (recommended)
 enableXsrfProtection = true  # Keep XSRF protection for security
