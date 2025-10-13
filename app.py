@@ -107,6 +107,8 @@ def ranker_page():
                 accept_multiple_files=True
                 , key="resume_file_uploader" 
             )
+            if resume_files:
+                st.info(f"**{len(resume_files)}** resume(s) uploaded.")
         
         with col4:
             keywords = st.text_input(
@@ -225,12 +227,6 @@ def display_results(df, job_desc):
             st.markdown(f"**Email:** `{row['email']}` | **SBERT Similarity:** `{row['similarity']:.4f}`")
             st.markdown(f"**Justification:** {row['justification']}")
             
-            # Only show Key Matching Terms if LLM is used, as it's redundant otherwise.
-            if st.session_state.get("use_llm", False):
-                matches_html = " ".join([f'<span style="background-color: #d1e7dd; color: #0f5132; padding: 4px 8px; border-radius: 4px; margin-right: 5px; font-size: 0.9em; font-weight: 600;">{match.replace("_", " ")}</span>' 
-                                         for match in row['key_matches'].split(', ')])
-                st.markdown(f"**Key Matching Terms:** {matches_html}", unsafe_allow_html=True)
-
             st.markdown("---")
             
             col_s, col_e, col_ed = st.columns(3)
