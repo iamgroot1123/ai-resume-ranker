@@ -6,7 +6,6 @@ The application now runs as a single-page dashboard built with **Streamlit**, of
 
 Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai-resume-ranker-pb4m.onrender.com/). **Note: The initial page load may take 2-3 minutes. This delay is due to the service performing a cold start.**
 
-
 ## Features
 
 - **Hybrid Ranking (LLM/SBERT)**: Uses **SBERT** (`all-mpnet-base-v2`) for fast semantic similarity filtering, then uses an **LLM (GPT-3.5-turbo)** to generate a final, qualitative **Fit Score (1-10)** and detailed justification. Includes a fallback to SBERT scoring if the LLM API call fails.
@@ -18,6 +17,9 @@ Explore the live app at [https://ai-resume-ranker-pb4m.onrender.com/](https://ai
 - **Universal Extraction**: Attempts to extract **Skills, Experience, and Education** based on resume section headers, making the system universal for different job types.
 - **Justification & Key Matches**: Identifies the primary technical overlaps using TF-IDF and presents them as justification tags, supporting the LLM's final score.
 - **Optimized Performance**: SBERT model is loaded only once using Streamlit's `@st.cache_resource`, ensuring fast reruns after the initial load.
+
+![System Architecture](screenshots/architecture.png)
+_An overview of the AI Resume Ranker's system architecture and data flow._
 
 ## Technical Stack
 
