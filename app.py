@@ -3,7 +3,6 @@ import pandas as pd
 import os
 from utils import load_model_once, rank_resumes, get_all_parsed_resumes, init_db, get_resume_bytes_from_db
 from io import BytesIO
-import base64
 from dotenv import load_dotenv
 import sqlite3
 
@@ -19,7 +18,7 @@ def get_db_connection(version="1.1"):
     """Creates and caches an in-memory SQLite database connection for the session."""
     # Using ":memory:" creates a temporary, in-memory database
     conn = sqlite3.connect(":memory:", check_same_thread=False)
-    st.write(f"Initializing DB v{version}...") # Helpful for debugging
+    # st.write(f"Initializing DB v{version}...")  # Debug only
     init_db(conn) # Initialize the table structure on the new connection
     return conn
 
@@ -193,18 +192,30 @@ def ranker_page():
                 st.session_state.ranked_resumes = None # Ensure state is cleared
             else:
                 st.success(f"Successfully ranked {len(top_resumes_df)} resumes.")
+                if keywords and keywords.strip():
+                    st.info("Keyword filter applied. Some resumes may have been excluded because they did not contain the required keywords.")
+                
                 # --- Store results in session state to persist ---
+                total_candidates = len(valid_resume_files)
                 st.session_state.ranked_resumes = top_resumes_df
                 st.session_state.job_desc_for_results = final_job_desc
+                st.session_state.total_candidates = total_candidates
+
 
     # --- Display results if they exist in the session state ---
     if st.session_state.ranked_resumes is not None and not st.session_state.ranked_resumes.empty:
-        display_results(st.session_state.ranked_resumes, st.session_state.job_desc_for_results)
+        display_results(st.session_state.ranked_resumes)
 
 
 
-def display_results(df, job_desc):
-    st.subheader(f"🏆 Top {len(df)} Candidates Found")
+def display_results(df):
+    total = st.session_state.get("total_candidates", len(df))
+    st.subheader(f"🏆 Top {len(df)} Candidates")
+    st.caption(f"{total} resumes uploaded • showing top {len(df)} after filtering and ranking")
+    
+    mode_label = "LLM (GPT-3.5) + SBERT" if st.session_state.get("use_llm") else "SBERT-only"
+    st.caption(f"Scoring mode: **{mode_label}**")
+    
     st.markdown("---")
     
     # --- Selection Logic ---
@@ -331,6 +342,16 @@ def database_viewer_page():
             'upload_date': 'Upload Date'
         })
         
+        search_query = st.text_input("Search by email, file name, or skill (optional)")
+        if search_query:
+            q = search_query.lower()
+            mask = (
+                df_db['File Name'].str.lower().str.contains(q) |
+                df_db['Email ID'].str.lower().str.contains(q) |
+                df_db['Extracted Skills'].str.lower().str.contains(q)
+            )
+            df_db = df_db[mask]
+
         st.dataframe(df_db, use_container_width=True, hide_index=True)
         
         # --- Download Database CSV ---
