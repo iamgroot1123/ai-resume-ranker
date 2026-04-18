@@ -9,5 +9,13 @@ __pycache__/
 venv/
 .venv/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.eslintcache
+
 # Project specific
 Results/
+
+run-app
+logs
