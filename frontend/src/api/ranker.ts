@@ -1,4 +1,4 @@
-import type { RankRequest, RankResponse } from '../types';
+import type { RankRequest, RankResponse, ApplicantRequest, ApplicantResult } from '../types';
 
 const API_BASE = '/api';
 
@@ -44,4 +44,31 @@ export async function checkHealth(): Promise<{ status: string; model_loaded: boo
   const response = await fetch(`${API_BASE}/health`);
   if (!response.ok) throw new Error('Backend unreachable');
   return response.json();
+}
+
+/**
+ * Analyze a single resume against a job description (Applicant Mode).
+ * API key is sent per-request — never stored.
+ */
+export async function analyzeApplicant(request: ApplicantRequest): Promise<ApplicantResult> {
+  const formData = new FormData();
+  formData.append('job_desc_text', request.jobDescText);
+  if (request.jobDescFile) {
+    formData.append('job_desc_file', request.jobDescFile);
+  }
+  formData.append('api_key', request.apiKey);
+  formData.append('llm_model', request.llmModel);
+  formData.append('resume', request.resumeFile);
+
+  const response = await fetch(`${API_BASE}/analyze`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({ detail: 'Unknown error' }));
+    throw new Error(payload.detail ?? `Server error: ${response.status}`);
+  }
+
+  return response.json() as Promise<ApplicantResult>;
 }

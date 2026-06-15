@@ -18,4 +18,5 @@ frontend/.eslintcache
 Results/
 
 run-app
+check_keys.py
 logs

@@ -11,8 +11,6 @@ interface ConfigPanelProps {
   onTopNChange: (v: number) => void;
   useLlm: boolean;
   onUseLlmChange: (v: boolean) => void;
-  llmModel: string;
-  onLlmModelChange: (v: string) => void;
 }
 
 export default function ConfigPanel({
@@ -24,8 +22,6 @@ export default function ConfigPanel({
   onTopNChange,
   useLlm,
   onUseLlmChange,
-  llmModel,
-  onLlmModelChange,
 }: ConfigPanelProps) {
   const [open, setOpen] = useState(false);
 
@@ -129,7 +125,7 @@ export default function ConfigPanel({
                     }}
                   >
                     <Info size={11} style={{ marginTop: 2, flexShrink: 0 }} />
-                    Uses GPT-3.5-turbo for qualitative fit scores and justifications. Requires an API key.
+                    Uses GPT models for qualitative fit scores and justifications. Requires an API key.
                   </motion.p>
                 )}
               </div>
@@ -148,7 +144,7 @@ export default function ConfigPanel({
                   >
                     <label className="form-label" htmlFor="api-key-input">
                       <Key size={13} />
-                      API Key (OpenAI or OpenRouter)
+                      API Key (OpenAI)
                     </label>
                     <input
                       id="api-key-input"
@@ -165,21 +161,7 @@ export default function ConfigPanel({
                       Your key is sent per-request only and is never stored anywhere.
                     </p>
 
-                    <label className="form-label" htmlFor="model-select" style={{ marginTop: 12 }}>
-                      <Zap size={13} />
-                      Model Selection
-                    </label>
-                    <select
-                      id="model-select"
-                      className="input"
-                      value={llmModel}
-                      onChange={(e) => onLlmModelChange(e.target.value)}
-                    >
-                      <option value="gpt-3.5-turbo-1106">GPT-3.5 Turbo</option>
-                      <option value="gpt-4o">GPT-4o</option>
-                      <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                      <option value="meta-llama/llama-3.3-70b-instruct:free">Llama 3.3 70B (OpenRouter Free)</option>
-                    </select>
+
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -206,30 +188,33 @@ export default function ConfigPanel({
                 </p>
               </div>
 
-              {/* Top-N slider */}
+              {/* Top-N input */}
               <div className="form-field">
-                <label className="form-label" htmlFor="topn-slider">
+                <label className="form-label" htmlFor="topn-input">
                   <Hash size={13} />
-                  Show Top&nbsp;
-                  <span style={{ color: 'var(--color-violet-light)', fontWeight: 800, fontSize: '0.9rem', letterSpacing: 0, textTransform: 'none' }}>
-                    {topN}
-                  </span>
-                  &nbsp;Results
+                  Show Top Results
                 </label>
                 <input
-                  id="topn-slider"
-                  type="range"
+                  id="topn-input"
+                  type="number"
                   className="input"
                   min={1}
-                  max={30}
-                  value={topN}
-                  onChange={(e) => onTopNChange(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: 'var(--color-violet)' }}
+                  value={topN === 0 ? '' : topN}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    onTopNChange(isNaN(val) ? 0 : Math.max(0, val));
+                  }}
+                  onBlur={() => {
+                    if (topN < 1) {
+                      onTopNChange(5);
+                    }
+                  }}
+                  placeholder="e.g. 5"
+                  style={{ width: '100%' }}
                 />
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                  <span>1</span>
-                  <span>30</span>
-                </div>
+                <p style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                  Number of top candidates to display (and analyze with LLM, if enabled).
+                </p>
               </div>
             </div>
           </motion.div>

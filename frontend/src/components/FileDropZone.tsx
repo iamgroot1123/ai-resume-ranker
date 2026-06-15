@@ -6,7 +6,6 @@ interface FileDropZoneProps {
   files: File[];
   onChange: (files: File[]) => void;
   accept?: string;
-  maxFiles?: number;
   label?: string;
 }
 
@@ -22,7 +21,6 @@ export default function FileDropZone({
   files,
   onChange,
   accept = '.pdf,.txt',
-  maxFiles = 50,
   label = 'Upload Resumes',
 }: FileDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -37,10 +35,10 @@ export default function FileDropZone({
       const merged = [
         ...files,
         ...valid.filter((v) => !files.some((e) => e.name === v.name)),
-      ].slice(0, maxFiles);
+      ];
       onChange(merged);
     },
-    [files, maxFiles, onChange]
+    [files, onChange]
   );
 
   const removeFile = (name: string) => {

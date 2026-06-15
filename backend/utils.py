@@ -181,9 +181,6 @@ OPENROUTER_FALLBACK_MODELS = [
 # Status codes that are worth retrying (transient failures)
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
-# Hard limits to avoid token overflows on free-tier models (~1000 tokens each)
-MAX_INPUT_CHARS = 4000
-
 
 def _call_single_model(
     client,
@@ -191,9 +188,10 @@ def _call_single_model(
     prompt: str,
     is_openrouter: bool,
     max_retries: int = 4,
-) -> Tuple[float, str]:
+) -> Dict[str, Any]:
     """
     Attempt one model with exponential backoff on retryable errors.
+    Returns a dict with fit_score, justification, skills, experience, education.
     Raises on non-retryable errors or after exhausting retries.
     """
     from openai import APIStatusError, APITimeoutError, RateLimitError
@@ -206,7 +204,7 @@ def _call_single_model(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=300,      # Tight output cap — we only need a small JSON
+                max_tokens=600,      # Increased — now returning 5 fields
                 timeout=10,          # Fail fast; don't hang waiting for overloaded providers
             )
             # response_format is OpenAI-only; OpenRouter providers may reject it
@@ -225,9 +223,8 @@ def _call_single_model(
                 result_text = result_text[:-3]
 
             result_json = json.loads(result_text.strip())
-            score = float(result_json.get("fit_score", 0.0))
-            justification = result_json.get("justification", "Could not parse justification.")
-            return score, justification
+            # Return the full raw JSON — callers are responsible for field mapping
+            return result_json
 
         except APITimeoutError:
             print(f"[WARN] Timeout on {model_name} (attempt {attempt + 1}/{max_retries}). Retrying in {retry_delay}s...")
@@ -249,16 +246,25 @@ def _call_single_model(
 
 def get_llm_score_and_justification(
     resume_text: str, job_desc_text: str, api_key: str, model_name: str = "gpt-3.5-turbo-1106"
-) -> Tuple[float, str]:
+) -> Dict[str, Any]:
     """
-    Score a resume against a job description using an LLM.
+    Score AND extract structured data from a resume in a single LLM call.
+
+    Returns a dict with:
+      fit_score, justification, skills, experience, education
 
     For OpenRouter keys/models: uses a fallback chain across free-tier models.
-    Falls back to the next model if the current one times out, rate-limits,
-    or returns a 5xx error.
     """
+    empty = {
+        "fit_score": 0.0,
+        "justification": "API key not provided.",
+        "skills": "Not specified",
+        "experience": "Not extracted",
+        "education": "Not extracted",
+    }
+
     if not api_key:
-        return 0.0, "API key not provided."
+        return empty
 
     from openai import OpenAI
 
@@ -273,46 +279,49 @@ def get_llm_score_and_justification(
                 "X-Title": "ResumeIQ",
             }
         )
-        # For OpenRouter: always try the full fallback chain starting from the
-        # user's chosen model, then the built-in fallbacks
         model_chain = [model_name] + [
             m for m in OPENROUTER_FALLBACK_MODELS if m != model_name
         ]
     else:
         client = OpenAI(api_key=api_key)
-        model_chain = [model_name]   # OpenAI: use exactly what the user picked
+        model_chain = [model_name]
 
-    # Truncate inputs to avoid token overflow on free-tier models
-    resume_truncated = resume_text[:MAX_INPUT_CHARS]
-    jd_truncated = job_desc_text[:MAX_INPUT_CHARS]
+    prompt = f"""You are an expert technical recruiter. Analyze this resume against the job description.
 
-    prompt = f"""You are an expert technical recruiter. Evaluate the candidate's resume against the job description.
-Provide a "fit_score" from 1.0 to 10.0 (10.0 = perfect match).
-Also provide a concise "justification" (2-3 sentences) explaining key strengths or gaps.
+Return ONLY a valid JSON object with exactly these 5 keys:
+- "fit_score": number from 1.0 to 10.0 (10.0 = perfect match)
+- "justification": 2-3 sentence summary of strengths or gaps
+- "skills": comma-separated list of technical skills found in the resume
+- "experience": most recent or relevant job title and company (e.g. "ML Engineer at Google")
+- "education": highest degree and institution (e.g. "B.Tech CSE, IIT Delhi 2022")
 
-Return ONLY a valid JSON object with exactly two keys: "fit_score" and "justification".
+If a field cannot be determined, use "Not specified" as the value.
 
 --- JOB DESCRIPTION ---
-{jd_truncated}
+{job_desc_text}
 
 --- RESUME ---
-{resume_truncated}"""
+{resume_text}"""
 
     for model in model_chain:
         try:
             print(f"[INFO] Trying model: {model}")
-            return _call_single_model(client, model, prompt, is_openrouter)
+            raw = _call_single_model(client, model, prompt, is_openrouter)
+            return {
+                "fit_score": float(raw.get("fit_score", 0.0)),
+                "justification": raw.get("justification", "Could not parse justification."),
+                "skills": raw.get("skills", "Not specified"),
+                "experience": raw.get("experience", "Not extracted"),
+                "education": raw.get("education", "Not extracted"),
+            }
         except Exception as e:
             status = getattr(e, "status_code", None)
-            # Hard stop on auth errors — no point trying fallback models
             if status in (401, 402):
                 msg = str(e)
-                if "invalid_api_key" in msg or "401" in msg:
-                    return 0.0, f"LLM API call failed: {msg}"
-                return 0.0, f"LLM API call failed: {msg}"
+                return {**empty, "justification": f"LLM API call failed: {msg}"}
             print(f"[WARN] Model {model} failed: {e}. Trying next fallback...")
 
-    return 0.0, "All LLM models failed — SBERT fallback will be used."
+    return {**empty, "justification": "All LLM models failed — SBERT fallback will be used."}
 
 
 # ---------------------------------------------------------------------------
@@ -475,33 +484,48 @@ def rank_resumes(
         file_bytes = original["file_bytes"]
 
         matches = extract_key_matches(original_text, cleaned_jd)
+        candidate_fallback = False
 
         if use_llm:
             # Add a small delay between calls to respect free tier RPM limits
-            if results: # Don't sleep for the very first one
+            if results:  # Don't sleep for the very first one
                 time.sleep(2.0)
-                
-            rating_10, justification = get_llm_score_and_justification(
+
+            llm_result = get_llm_score_and_justification(
                 original_text, job_desc_text, api_key, llm_model
             )
-            
-            # Hard stop: if key is unauthorized (401), abort all and alert user
+
+            rating_10 = llm_result["fit_score"]
+            justification = llm_result["justification"]
+
+            # Hard stop: if key is unauthorized (401/402), abort all and alert user
             if rating_10 == 0.0 and "401" in justification and "invalid_api_key" in justification:
                 return [], "Invalid API Key provided. Please check your API key and try again."
 
-            # Catch-all graceful fallback: any LLM failure (rate limit, 402 spend cap,
-            # parse error, timeouts, etc.) falls back silently to SBERT scoring.
-            if rating_10 == 0.0:
+            # LLM succeeded — use its structured extraction
+            if rating_10 > 0.0:
+                llm_skills = llm_result["skills"]
+                llm_experience = llm_result["experience"]
+                llm_education = llm_result["education"]
+            else:
+                # Any failure → fall back to SBERT score + regex extraction
                 rating_10 = round(1 + row["similarity"] * 9, 1)
                 justification = (
                     f"LLM unavailable — SBERT fallback. "
                     f"Key overlaps: {', '.join(matches).replace('_', ' ')}."
                 )
+                llm_skills = parsed_info["skills"]
+                llm_experience = parsed_info["experience"]
+                llm_education = parsed_info["education"]
+                candidate_fallback = True
         else:
             rating_10 = round(1 + row["similarity"] * 9, 1)
             justification = (
                 f"Strong semantic alignment on: {', '.join(matches).replace('_', ' ')}."
             )
+            llm_skills = parsed_info["skills"]
+            llm_experience = parsed_info["experience"]
+            llm_education = parsed_info["education"]
 
         results.append({
             "id": row["ID"],
@@ -510,12 +534,13 @@ def rank_resumes(
             "rating_10": rating_10,
             "key_matches": ", ".join(matches).replace("_", " "),
             "justification": justification,
-            "skills": parsed_info["skills"],
-            "experience": parsed_info["experience"],
-            "education": parsed_info["education"],
+            "skills": llm_skills,
+            "experience": llm_experience,
+            "education": llm_education,
             # Embed file bytes so frontend can offer stateless downloads
             "file_bytes_b64": base64.b64encode(file_bytes).decode("utf-8"),
             "file_type": "pdf" if row["ID"].lower().endswith(".pdf") else "txt",
+            "llm_fallback": candidate_fallback,
         })
 
     if not results:
@@ -523,3 +548,138 @@ def rank_resumes(
 
     results.sort(key=lambda x: x["rating_10"], reverse=True)
     return results, None
+
+
+# ---------------------------------------------------------------------------
+# Applicant Mode Pipeline
+# ---------------------------------------------------------------------------
+
+def analyze_applicant(
+    resume_file: Dict[str, Any],
+    job_desc_text: str,
+    sbert_model: SentenceTransformer,
+    api_key: str = "",
+    llm_model: str = "gpt-3.5-turbo-1106",
+) -> Tuple[Dict[str, Any], Optional[str]]:
+    """
+    Analyze a single resume against a job description for Applicant Mode.
+
+    Returns a structured result with match_score (0-100), summary, strengths,
+    gaps, and actionable suggestions. Falls back to SBERT-only if no LLM key.
+
+    Returns:
+        (result_dict, error_string_or_None)
+    """
+    # --- Extract text from the resume file ---
+    filename = resume_file.get("name", "")
+    file_bytes = resume_file.get("bytes", b"")
+
+    if not filename or not file_bytes:
+        return {}, "Invalid resume file."
+
+    try:
+        if filename.lower().endswith(".txt"):
+            resume_text = file_bytes.decode("utf-8", errors="ignore").strip() or "No content"
+        elif filename.lower().endswith(".pdf"):
+            resume_text = extract_text_from_pdf(BytesIO(file_bytes))
+        else:
+            return {}, f"Unsupported file type: {filename}. Please upload a .pdf or .txt file."
+    except Exception as e:
+        return {}, f"Failed to read resume: {str(e)}"
+
+    # --- SBERT semantic similarity (always computed as base score) ---
+    cleaned_jd = clean_text(job_desc_text.strip() or "No content")
+    cleaned_resume = clean_text(resume_text)
+
+    job_vec = vectorize_texts_sbert([cleaned_jd], sbert_model)[0]
+    resume_vec = vectorize_texts_sbert([cleaned_resume], sbert_model)[0]
+    similarity = float(cosine_similarity(resume_vec.reshape(1, -1), job_vec.reshape(1, -1))[0][0])
+    sbert_score = round(similarity * 100, 1)
+
+    # --- LLM analysis (if key provided) ---
+    if api_key:
+        from openai import OpenAI
+
+        is_openrouter = api_key.startswith("sk-or-") or "/" in llm_model
+
+        if is_openrouter:
+            client = OpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+                default_headers={
+                    "HTTP-Referer": "https://resumeiq.app",
+                    "X-Title": "ResumeIQ",
+                }
+            )
+            model_chain = [llm_model] + [
+                m for m in OPENROUTER_FALLBACK_MODELS if m != llm_model
+            ]
+        else:
+            client = OpenAI(api_key=api_key)
+            model_chain = [llm_model]
+
+        prompt = f"""You are a professional career coach. Analyze this resume against the job description and give actionable feedback to help the applicant improve their chances.
+
+Return ONLY a valid JSON object with exactly these 6 keys:
+- "match_score": integer from 0 to 100 representing how well the resume matches the JD (100 = perfect fit)
+- "summary": 2-3 sentence overall assessment of the match
+- "strengths": array of 3-5 strings — what the resume does well vs the JD
+- "gaps": array of 3-5 strings — specific skills, experience, or qualifications missing
+- "suggestions": array of 3-5 strings — concrete actionable steps to improve the resume for this JD
+- "keywords_to_add": array of important JD keywords not found in the resume
+
+Be specific and constructive. Each item in arrays should be a complete, actionable sentence.
+
+--- JOB DESCRIPTION ---
+{job_desc_text}
+
+--- RESUME ---
+{resume_text}"""
+
+        for model in model_chain:
+            try:
+                print(f"[INFO] Applicant analysis — trying model: {model}")
+                raw = _call_single_model(client, model, prompt, is_openrouter)
+                # _call_single_model now returns raw JSON — map applicant-specific fields
+                return {
+                    "match_score": int(raw.get("match_score", sbert_score)),
+                    "summary": raw.get("summary", "Analysis complete."),
+                    "strengths": raw.get("strengths", []),
+                    "gaps": raw.get("gaps", []),
+                    "suggestions": raw.get("suggestions", []),
+                    "keywords_to_add": raw.get("keywords_to_add", []),
+                    "semantic_score": sbert_score,
+                    "llm_used": True,
+                    "llm_fallback": False,
+                    "filename": filename,
+                }, None
+
+            except Exception as e:
+                status = getattr(e, "status_code", None)
+                if status in (401, 402):
+                    return {}, f"Invalid API Key: {str(e)}"
+                print(f"[WARN] Applicant analysis — model {model} failed: {e}. Trying fallback...")
+
+        # All LLM models failed — fall through to SBERT-only
+        print("[WARN] All LLM models failed for applicant analysis. Using SBERT-only.")
+
+    # --- SBERT-only fallback ---
+    matches = extract_key_matches(resume_text, cleaned_jd, top_n=5)
+    match_keywords = [m.replace("_", " ") for m in matches if m != "No significant matches"]
+
+    return {
+        "match_score": sbert_score,
+        "summary": (
+            f"Your resume has a {sbert_score}% semantic similarity to this job description. "
+            f"Enable LLM scoring with an API key for detailed strengths, gaps, and suggestions."
+        ),
+        "strengths": [f"Semantic overlap detected on: {', '.join(match_keywords)}"] if match_keywords else [],
+        "gaps": ["Enable LLM analysis for detailed gap identification."],
+        "suggestions": ["Add your API key and enable LLM scoring for actionable improvement suggestions."],
+        "keywords_to_add": [],
+        "semantic_score": sbert_score,
+        "llm_used": False,
+        "llm_fallback": bool(api_key),
+        "filename": filename,
+    }, None
+

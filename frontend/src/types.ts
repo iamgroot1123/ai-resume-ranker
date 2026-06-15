@@ -12,6 +12,7 @@ export interface RankedCandidate {
   /** Base64-encoded original file bytes for stateless client-side download */
   file_bytes_b64: string;
   file_type: 'pdf' | 'txt';
+  llm_fallback?: boolean;
 }
 
 /** Full API response from POST /api/rank */
@@ -37,6 +38,9 @@ export interface RankRequest {
 /** App view state */
 export type AppView = 'upload' | 'results';
 
+/** Application mode */
+export type AppMode = 'recruiter' | 'applicant';
+
 /** Toast severity */
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -44,4 +48,27 @@ export interface ToastMessage {
   id: string;
   type: ToastType;
   message: string;
+}
+
+/** Applicant Mode — request payload */
+export interface ApplicantRequest {
+  jobDescText: string;
+  jobDescFile?: File | null;
+  resumeFile: File;
+  apiKey: string;
+  llmModel: string;
+}
+
+/** Applicant Mode — result from POST /api/analyze */
+export interface ApplicantResult {
+  match_score: number;         // 0–100
+  summary: string;
+  strengths: string[];
+  gaps: string[];
+  suggestions: string[];
+  keywords_to_add: string[];
+  semantic_score: number;      // raw SBERT score 0–100
+  llm_used: boolean;
+  llm_fallback?: boolean;
+  filename: string;
 }

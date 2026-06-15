@@ -19,7 +19,7 @@ export default function UploadView({ onSubmit, isLoading, error }: UploadViewPro
   const [keywords, setKeywords] = useState('');
   const [topN, setTopN] = useState(5);
   const [useLlm, setUseLlm] = useState(false);
-  const [llmModel, setLlmModel] = useState('gpt-3.5-turbo-1106');
+  const llmModel = 'gpt-3.5-turbo-1106';
   const jdFileRef = useRef<HTMLInputElement>(null);
 
   const charCount = jobDescText.length;
@@ -234,7 +234,7 @@ export default function UploadView({ onSubmit, isLoading, error }: UploadViewPro
                 Candidate Documents
               </h2>
               <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: 1 }}>
-                Upload PDF or TXT resumes (up to 50)
+                Upload PDF or TXT resumes
               </p>
             </div>
             {resumeFiles.length > 0 && (
@@ -271,8 +271,6 @@ export default function UploadView({ onSubmit, isLoading, error }: UploadViewPro
           onTopNChange={setTopN}
           useLlm={useLlm}
           onUseLlmChange={setUseLlm}
-          llmModel={llmModel}
-          onLlmModelChange={setLlmModel}
         />
       </motion.div>
 

@@ -21,7 +21,7 @@ export default function LoadingScreen({
 }: LoadingScreenProps) {
   const getModelLabel = (name: string) => {
     if (!name) return 'LLM';
-    if (name.includes('gpt-3.5')) return 'GPT-3.5';
+    if (name.includes('gpt-3.5')) return 'GPT';
     if (name.includes('gpt-4o')) return 'GPT-4o';
     if (name.includes('gpt-4')) return 'GPT-4';
     if (name.includes('llama')) return 'Llama 3.3';

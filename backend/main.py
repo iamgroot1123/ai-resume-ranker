@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend.utils import load_model_once, rank_resumes
+from backend.utils import load_model_once, rank_resumes, analyze_applicant
 
 # ---------------------------------------------------------------------------
 # Lifespan — load heavy resources once at startup
@@ -144,6 +144,60 @@ async def rank_endpoint(
             "scoring_mode": "llm+sbert" if use_llm else "sbert",
         }
     )
+
+
+@app.post("/api/analyze")
+async def analyze_endpoint(
+    request: Request,
+    # Job description
+    job_desc_text: str = Form(""),
+    job_desc_file: Optional[UploadFile] = File(None),
+    # LLM config
+    api_key: str = Form(""),
+    llm_model: str = Form("gpt-3.5-turbo-1106"),
+    # Single resume file
+    resume: UploadFile = File(...),
+):
+    """
+    Analyze a single resume against a job description (Applicant Mode).
+    Returns match score, summary, strengths, gaps, and actionable suggestions.
+    """
+    # --- Resolve job description ---
+    final_jd = job_desc_text.strip()
+    if job_desc_file and job_desc_file.size and job_desc_file.size > 0:
+        jd_bytes = await job_desc_file.read()
+        final_jd = jd_bytes.decode("utf-8", errors="ignore").strip()
+
+    if not final_jd:
+        raise HTTPException(status_code=422, detail="A job description is required.")
+
+    # --- Validate SBERT model ---
+    model = getattr(request.app.state, "model", None)
+    if model is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The semantic model is not loaded. Please try again in a moment.",
+        )
+
+    # --- Read resume file ---
+    if resume.size == 0:
+        raise HTTPException(status_code=422, detail="Resume file is empty.")
+    content = await resume.read()
+    resume_dict = {"name": resume.filename, "bytes": content}
+
+    # --- Run applicant analysis ---
+    result, error = analyze_applicant(
+        resume_file=resume_dict,
+        job_desc_text=final_jd,
+        sbert_model=model,
+        api_key=api_key.strip(),
+        llm_model=llm_model,
+    )
+
+    if error:
+        raise HTTPException(status_code=400, detail=error)
+
+    return JSONResponse(content=result)
 
 
 # ---------------------------------------------------------------------------

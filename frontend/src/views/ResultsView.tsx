@@ -9,6 +9,7 @@ import {
   Users,
   Zap,
   BarChart2,
+  AlertTriangle,
 } from 'lucide-react';
 import CandidateCard from '../components/CandidateCard';
 import type { RankResponse } from '../types';
@@ -108,9 +109,30 @@ export default function ResultsView({ response, onBack }: ResultsViewProps) {
   }
 
   const SortIcon = sortAsc ? SortAsc : SortDesc;
+  const hasFallback = response.candidates.some((c) => c.llm_fallback);
 
   return (
     <div className="container" style={{ paddingTop: 36, paddingBottom: 64 }}>
+      {/* Fallback Banner */}
+      {hasFallback && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)',
+            borderRadius: 'var(--radius-sm)', padding: '14px 18px', marginBottom: 24,
+            color: '#fbbf24', fontSize: '0.88rem', fontWeight: 500,
+          }}
+        >
+          <AlertTriangle size={18} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>LLM analysis unavailable.</strong> The AI models failed to respond correctly due to load or limits. 
+            The results below were ranked using our fallback <strong>SBERT-only</strong> semantic analysis.
+          </span>
+        </motion.div>
+      )}
+
       {/* Toolbar */}
       <motion.div
         initial={{ opacity: 0, y: -12 }}
