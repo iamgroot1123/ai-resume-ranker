@@ -325,12 +325,33 @@ If a field cannot be determined, use "Not specified" as the value.
 # Vectorization & Similarity
 # ---------------------------------------------------------------------------
 
-def vectorize_texts_sbert(texts: List[str], model: Any = None, batch_size: int = 100) -> np.ndarray:
+def vectorize_texts_sbert(texts: List[str], model: Any = None, batch_size: int = 100, api_key: str = "") -> np.ndarray:
     valid_texts = [
         clean_text(t) if isinstance(t, str) and t.strip() else "No content"
         for t in texts
     ]
     
+    # Try OpenAI Embeddings first if an API key is available
+    openai_key = api_key.strip() or os.getenv("OPENAI_API_KEY", "").strip()
+    if openai_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=openai_key)
+            vectors = []
+            for i in range(0, len(valid_texts), batch_size):
+                batch = valid_texts[i: i + batch_size]
+                response = client.embeddings.create(
+                    input=batch,
+                    model="text-embedding-3-small"
+                )
+                batch_vectors = [d.embedding for d in response.data]
+                vectors.append(np.array(batch_vectors, dtype=np.float32))
+            print("[INFO] Generated embeddings using OpenAI text-embedding-3-small.")
+            return np.vstack(vectors)
+        except Exception as e:
+            print(f"[WARN] OpenAI embeddings failed: {e}. Falling back to Hugging Face SBERT API...")
+            
+    # Fallback to Hugging Face Serverless Inference API (all-MiniLM-L6-v2)
     MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
     API_URL = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{MODEL_ID}"
     
@@ -473,7 +494,10 @@ def rank_resumes(
         return [], "No valid documents could be processed. Check file formats (.txt / .pdf)."
 
     cleaned_jd = clean_text(job_desc_text.strip() or "No content")
-    job_vector = vectorize_texts_sbert([cleaned_jd], model)[0]
+    try:
+        job_vector = vectorize_texts_sbert([cleaned_jd], model, api_key=api_key)[0]
+    except Exception as e:
+        return [], f"Failed to generate search embeddings for job description: {str(e)}"
 
     df_filtered = filter_resumes(df, keywords)
     if df_filtered.empty:
@@ -482,7 +506,10 @@ def rank_resumes(
     top_n = min(top_n, len(df_filtered))
 
     # SBERT similarity for all filtered docs
-    resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model)
+    try:
+        resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model, api_key=api_key)
+    except Exception as e:
+        return [], f"Failed to generate search embeddings for resumes: {str(e)}"
     similarities = cosine_similarity(resume_vectors, job_vector.reshape(1, -1)).flatten()
     df_filtered = df_filtered.copy()
     df_filtered["similarity"] = similarities
@@ -605,8 +632,11 @@ def analyze_applicant(
     cleaned_jd = clean_text(job_desc_text.strip() or "No content")
     cleaned_resume = clean_text(resume_text)
 
-    job_vec = vectorize_texts_sbert([cleaned_jd], sbert_model)[0]
-    resume_vec = vectorize_texts_sbert([cleaned_resume], sbert_model)[0]
+    try:
+        job_vec = vectorize_texts_sbert([cleaned_jd], sbert_model, api_key=api_key)[0]
+        resume_vec = vectorize_texts_sbert([cleaned_resume], sbert_model, api_key=api_key)[0]
+    except Exception as e:
+        return {}, f"Failed to generate semantic match embeddings: {str(e)}"
     similarity = float(cosine_similarity(resume_vec.reshape(1, -1), job_vec.reshape(1, -1))[0][0])
     sbert_score = round(similarity * 100, 1)
 
