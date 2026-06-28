@@ -28,7 +28,7 @@ def load_model_once() -> Optional[SentenceTransformer]:
     global _model
     if _model is None:
         try:
-            _model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
+            _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
             print("[INFO] SBERT model loaded successfully.")
         except Exception as e:
             print(f"[ERROR] Failed to load SBERT model: {e}")
