@@ -64,19 +64,6 @@ async def health(request: Request):
     return {"status": "ok", "model_loaded": model_ok}
 
 
-@app.get("/api/test-dns")
-async def test_dns():
-    import socket
-    results = {}
-    for host in ["api.openai.com", "api-inference.huggingface.co", "google.com"]:
-        try:
-            ip = socket.gethostbyname(host)
-            results[host] = f"OK: {ip}"
-        except Exception as e:
-            results[host] = f"ERROR: {str(e)}"
-    return results
-
-
 @app.post("/api/rank")
 async def rank_endpoint(
     request: Request,

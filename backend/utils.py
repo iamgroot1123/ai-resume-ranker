@@ -484,7 +484,7 @@ def rank_resumes(
         (results_list, error_string_or_None)
 
     Each result dict contains structured data + base64-encoded original file bytes
-    so the frontend can offer stateless downloads without a database.
+    so the frontend can offer stateless downloads.
     """
     if not model:
         return [], "Semantic model not loaded. Please check server configuration."
@@ -494,72 +494,107 @@ def rank_resumes(
         return [], "No valid documents could be processed. Check file formats (.txt / .pdf)."
 
     cleaned_jd = clean_text(job_desc_text.strip() or "No content")
-    try:
-        job_vector = vectorize_texts_sbert([cleaned_jd], model, api_key=api_key)[0]
-    except Exception as e:
-        return [], f"Failed to generate search embeddings for job description: {str(e)}"
+    
+    # --- Check if LLM should be used exclusively (bypassing SBERT) ---
+    if use_llm and api_key.strip():
+        df_filtered = filter_resumes(df, keywords)
+        if df_filtered.empty:
+            return [], "No documents matched the specified keywords."
 
-    df_filtered = filter_resumes(df, keywords)
-    if df_filtered.empty:
-        return [], "No documents matched the specified keywords."
+        top_n = min(top_n, len(df_filtered))
+        candidates = df_filtered.head(top_n)
 
-    top_n = min(top_n, len(df_filtered))
+        results: List[Dict[str, Any]] = []
+        for _, row in candidates.iterrows():
+            original = df[df["ID"] == row["ID"]].iloc[0]
+            original_text = original["Resume_str"]
+            parsed_info = original["parsed_data"]
+            file_bytes = original["file_bytes"]
 
-    # SBERT similarity for all filtered docs
-    try:
-        resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model, api_key=api_key)
-    except Exception as e:
-        return [], f"Failed to generate search embeddings for resumes: {str(e)}"
-    similarities = cosine_similarity(resume_vectors, job_vector.reshape(1, -1)).flatten()
-    df_filtered = df_filtered.copy()
-    df_filtered["similarity"] = similarities
+            matches = extract_key_matches(original_text, cleaned_jd)
+            candidate_fallback = False
 
-    # Select best candidates (by SBERT) to send to LLM if needed
-    candidates = df_filtered.sort_values(by="similarity", ascending=False).head(top_n)
-
-    results: List[Dict[str, Any]] = []
-    for _, row in candidates.iterrows():
-        original = df[df["ID"] == row["ID"]].iloc[0]
-        original_text = original["Resume_str"]
-        parsed_info = original["parsed_data"]
-        file_bytes = original["file_bytes"]
-
-        matches = extract_key_matches(original_text, cleaned_jd)
-        candidate_fallback = False
-
-        if use_llm:
             # Add a small delay between calls to respect free tier RPM limits
             if results:  # Don't sleep for the very first one
                 time.sleep(2.0)
 
-            llm_result = get_llm_score_and_justification(
-                original_text, job_desc_text, api_key, llm_model
-            )
-
-            rating_10 = llm_result["fit_score"]
-            justification = llm_result["justification"]
-
-            # Hard stop: if key is unauthorized (401/402), abort all and alert user
-            if rating_10 == 0.0 and "401" in justification and "invalid_api_key" in justification:
-                return [], "Invalid API Key provided. Please check your API key and try again."
-
-            # LLM succeeded — use its structured extraction
-            if rating_10 > 0.0:
-                llm_skills = llm_result["skills"]
-                llm_experience = llm_result["experience"]
-                llm_education = llm_result["education"]
-            else:
-                # Any failure → fall back to SBERT score + regex extraction
-                rating_10 = round(1 + row["similarity"] * 9, 1)
-                justification = (
-                    f"LLM unavailable — SBERT fallback. "
-                    f"Key overlaps: {', '.join(matches).replace('_', ' ')}."
+            try:
+                llm_result = get_llm_score_and_justification(
+                    original_text, job_desc_text, api_key.strip(), llm_model
                 )
+
+                rating_10 = llm_result["fit_score"]
+                justification = llm_result["justification"]
+
+                # Hard stop: if key is unauthorized (401/402), abort all and alert user
+                if rating_10 == 0.0 and "401" in justification and "invalid_api_key" in justification:
+                    return [], "Invalid API Key provided. Please check your API key and try again."
+
+                # LLM succeeded — use its structured extraction
+                if rating_10 > 0.0:
+                    llm_skills = llm_result["skills"]
+                    llm_experience = llm_result["experience"]
+                    llm_education = llm_result["education"]
+                else:
+                    raise Exception("LLM score evaluation failed")
+            except Exception as e:
+                # Any failure → fall back to dummy/base scores (since SBERT is bypassed)
+                rating_10 = 5.0
+                justification = f"LLM evaluation error: {str(e)}."
                 llm_skills = parsed_info["skills"]
                 llm_experience = parsed_info["experience"]
                 llm_education = parsed_info["education"]
                 candidate_fallback = True
-        else:
+
+            results.append({
+                "id": row["ID"],
+                "similarity": float(rating_10 / 10.0),  # Map fit score directly to similarity percentage
+                "email": row["email"],
+                "rating_10": rating_10,
+                "key_matches": ", ".join(matches).replace("_", " "),
+                "justification": justification,
+                "skills": llm_skills,
+                "experience": llm_experience,
+                "education": llm_education,
+                "file_bytes_b64": base64.b64encode(file_bytes).decode("utf-8"),
+                "file_type": "pdf" if row["ID"].lower().endswith(".pdf") else "txt",
+                "llm_fallback": candidate_fallback,
+            })
+        return results, None
+
+    else:
+        # --- Standard SBERT-only flow ---
+        try:
+            job_vector = vectorize_texts_sbert([cleaned_jd], model, api_key=api_key)[0]
+        except Exception as e:
+            return [], f"Failed to generate search embeddings for job description: {str(e)}"
+
+        df_filtered = filter_resumes(df, keywords)
+        if df_filtered.empty:
+            return [], "No documents matched the specified keywords."
+
+        top_n = min(top_n, len(df_filtered))
+
+        # SBERT similarity for all filtered docs
+        try:
+            resume_vectors = vectorize_texts_sbert(df_filtered["Resume_str"].tolist(), model, api_key=api_key)
+        except Exception as e:
+            return [], f"Failed to generate search embeddings for resumes: {str(e)}"
+        similarities = cosine_similarity(resume_vectors, job_vector.reshape(1, -1)).flatten()
+        df_filtered = df_filtered.copy()
+        df_filtered["similarity"] = similarities
+
+        # Select best candidates (by SBERT)
+        candidates = df_filtered.sort_values(by="similarity", ascending=False).head(top_n)
+
+        results: List[Dict[str, Any]] = []
+        for _, row in candidates.iterrows():
+            original = df[df["ID"] == row["ID"]].iloc[0]
+            original_text = original["Resume_str"]
+            parsed_info = original["parsed_data"]
+            file_bytes = original["file_bytes"]
+
+            matches = extract_key_matches(original_text, cleaned_jd)
             rating_10 = round(1 + row["similarity"] * 9, 1)
             justification = (
                 f"Strong semantic alignment on: {', '.join(matches).replace('_', ' ')}."
@@ -568,26 +603,21 @@ def rank_resumes(
             llm_experience = parsed_info["experience"]
             llm_education = parsed_info["education"]
 
-        results.append({
-            "id": row["ID"],
-            "similarity": float(row["similarity"]),
-            "email": row["email"],
-            "rating_10": rating_10,
-            "key_matches": ", ".join(matches).replace("_", " "),
-            "justification": justification,
-            "skills": llm_skills,
-            "experience": llm_experience,
-            "education": llm_education,
-            # Embed file bytes so frontend can offer stateless downloads
-            "file_bytes_b64": base64.b64encode(file_bytes).decode("utf-8"),
-            "file_type": "pdf" if row["ID"].lower().endswith(".pdf") else "txt",
-            "llm_fallback": candidate_fallback,
-        })
+            results.append({
+                "id": row["ID"],
+                "similarity": float(row["similarity"]),
+                "email": row["email"],
+                "rating_10": rating_10,
+                "key_matches": ", ".join(matches).replace("_", " "),
+                "justification": justification,
+                "skills": llm_skills,
+                "experience": llm_experience,
+                "education": llm_education,
+                "file_bytes_b64": base64.b64encode(file_bytes).decode("utf-8"),
+                "file_type": "pdf" if row["ID"].lower().endswith(".pdf") else "txt",
+                "llm_fallback": False,
+            })
 
-    if not results:
-        return [], "No candidates found after filtering and ranking."
-
-    results.sort(key=lambda x: x["rating_10"], reverse=True)
     return results, None
 
 
@@ -631,14 +661,6 @@ def analyze_applicant(
     # --- SBERT semantic similarity (always computed as base score) ---
     cleaned_jd = clean_text(job_desc_text.strip() or "No content")
     cleaned_resume = clean_text(resume_text)
-
-    try:
-        job_vec = vectorize_texts_sbert([cleaned_jd], sbert_model, api_key=api_key)[0]
-        resume_vec = vectorize_texts_sbert([cleaned_resume], sbert_model, api_key=api_key)[0]
-    except Exception as e:
-        return {}, f"Failed to generate semantic match embeddings: {str(e)}"
-    similarity = float(cosine_similarity(resume_vec.reshape(1, -1), job_vec.reshape(1, -1))[0][0])
-    sbert_score = round(similarity * 100, 1)
 
     # --- LLM analysis (if key provided) ---
     if api_key:
@@ -684,15 +706,16 @@ Be specific and constructive. Each item in arrays should be a complete, actionab
             try:
                 print(f"[INFO] Applicant analysis — trying model: {model}")
                 raw = _call_single_model(client, model, prompt, is_openrouter)
-                # _call_single_model now returns raw JSON — map applicant-specific fields
+                # LLM succeeded — completely bypass SBERT!
+                llm_score = int(raw.get("match_score", 0))
                 return {
-                    "match_score": int(raw.get("match_score", sbert_score)),
+                    "match_score": llm_score,
                     "summary": raw.get("summary", "Analysis complete."),
                     "strengths": raw.get("strengths", []),
                     "gaps": raw.get("gaps", []),
                     "suggestions": raw.get("suggestions", []),
                     "keywords_to_add": raw.get("keywords_to_add", []),
-                    "semantic_score": sbert_score,
+                    "semantic_score": float(llm_score),
                     "llm_used": True,
                     "llm_fallback": False,
                     "filename": filename,
@@ -704,8 +727,17 @@ Be specific and constructive. Each item in arrays should be a complete, actionab
                     return {}, f"Invalid API Key: {str(e)}"
                 print(f"[WARN] Applicant analysis — model {model} failed: {e}. Trying fallback...")
 
-        # All LLM models failed — fall through to SBERT-only
-        print("[WARN] All LLM models failed for applicant analysis. Using SBERT-only.")
+        # All LLM models failed — log and fall back to SBERT computation below
+        print("[WARN] All LLM models failed for applicant analysis. Computing SBERT fallback...")
+
+    # --- Compute SBERT semantic similarity (fallback or when no key provided) ---
+    try:
+        job_vec = vectorize_texts_sbert([cleaned_jd], sbert_model, api_key=api_key)[0]
+        resume_vec = vectorize_texts_sbert([cleaned_resume], sbert_model, api_key=api_key)[0]
+        similarity = float(cosine_similarity(resume_vec.reshape(1, -1), job_vec.reshape(1, -1))[0][0])
+        sbert_score = round(similarity * 100, 1)
+    except Exception as e:
+        return {}, f"Failed to generate semantic match embeddings: {str(e)}"
 
     # --- SBERT-only fallback ---
     matches = extract_key_matches(resume_text, cleaned_jd, top_n=5)
