@@ -10,7 +10,7 @@
       "destination": "https://ai-resume-ranker-pb4m.onrender.com/api/:path*"
     },
     {
-      "source": "/((?!api/).*)",
+      "source": "/:path*",
       "destination": "/index.html"
     }
   ]
