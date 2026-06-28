@@ -451,7 +451,7 @@ def rank_resumes(
     keywords: str,
     top_n: int,
     uploaded_resumes: List[Dict[str, Any]],
-    model: SentenceTransformer,
+    model: Any,
     api_key: str,
     use_llm: bool,
     llm_model: str = "gpt-3.5-turbo-1106"
@@ -571,7 +571,7 @@ def rank_resumes(
 def analyze_applicant(
     resume_file: Dict[str, Any],
     job_desc_text: str,
-    sbert_model: SentenceTransformer,
+    sbert_model: Any,
     api_key: str = "",
     llm_model: str = "gpt-3.5-turbo-1106",
 ) -> Tuple[Dict[str, Any], Optional[str]]:
