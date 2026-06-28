@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 import PyPDF2
@@ -14,25 +13,23 @@ import base64
 import openai
 import json
 import time
+import os
+import requests
 
 nltk.download('stopwords', quiet=True)
 
 # ---------------------------------------------------------------------------
 # Model — module-level singleton (no Streamlit cache, pure Python)
 # ---------------------------------------------------------------------------
-_model: Optional[SentenceTransformer] = None
+_model: Optional[str] = None
 
 
-def load_model_once() -> Optional[SentenceTransformer]:
-    """Load the SBERT model once and cache it as a module-level singleton."""
+def load_model_once() -> Optional[str]:
+    """Load SBERT API client representation."""
     global _model
     if _model is None:
-        try:
-            _model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
-            print("[INFO] SBERT model loaded successfully.")
-        except Exception as e:
-            print(f"[ERROR] Failed to load SBERT model: {e}")
-            _model = None
+        _model = "api_model"
+        print("[INFO] SBERT API client initialized.")
     return _model
 
 
@@ -328,16 +325,33 @@ If a field cannot be determined, use "Not specified" as the value.
 # Vectorization & Similarity
 # ---------------------------------------------------------------------------
 
-def vectorize_texts_sbert(texts: List[str], model: SentenceTransformer, batch_size: int = 100) -> np.ndarray:
+def vectorize_texts_sbert(texts: List[str], model: Any = None, batch_size: int = 100) -> np.ndarray:
     valid_texts = [
         clean_text(t) if isinstance(t, str) and t.strip() else "No content"
         for t in texts
     ]
+    
+    MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
+    API_URL = f"https://api-inference.huggingface.co/pipeline/feature-extraction/{MODEL_ID}"
+    
+    headers = {}
+    hf_token = os.getenv("HF_API_TOKEN")
+    if hf_token:
+        headers["Authorization"] = f"Bearer {hf_token}"
+        
     vectors = []
     for i in range(0, len(valid_texts), batch_size):
         batch = valid_texts[i: i + batch_size]
-        batch_vectors = model.encode(batch, show_progress_bar=False, convert_to_numpy=True)
-        vectors.append(batch_vectors)
+        payload = {"inputs": batch, "options": {"wait_for_model": True}}
+        try:
+            response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
+            response.raise_for_status()
+            batch_vectors = response.json()
+            vectors.append(np.array(batch_vectors, dtype=np.float32))
+        except Exception as e:
+            print(f"[ERROR] Hugging Face inference failed: {e}")
+            raise Exception(f"Failed to generate SBERT embeddings via Hugging Face API: {e}")
+            
     return np.vstack(vectors)
 
 
